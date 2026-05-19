@@ -85,6 +85,11 @@ def save_default_config(cfg: AppConfig) -> None:
 class Indicator:
     def __init__(self, debug_mode: bool = False) -> None:
         self.debug_mode = debug_mode
+        self.locked = True
+        self.drag_start_mouse_x = 0
+        self.drag_start_mouse_y = 0
+        self.drag_start_win_x = 0
+        self.drag_start_win_y = 0
         self.root = tk.Tk()
         self.root.title("Mouse -> Virtual Gamepad")
         self.root.overrideredirect(True)
@@ -93,9 +98,28 @@ class Indicator:
 
         frame = tk.Frame(self.root, bg="#1f1f1f", bd=1, relief="solid")
         frame.pack(fill="both", expand=True)
+        self.frame = frame
 
-        self.status_label = tk.Label(frame, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", 10, "bold"), anchor="w", padx=10, pady=4)
-        self.status_label.pack(fill="x")
+        self.header = tk.Frame(frame, bg="#1f1f1f")
+        self.header.pack(fill="x")
+
+        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", 10, "bold"), anchor="w", padx=10, pady=4)
+        self.status_label.pack(side="left", fill="x", expand=True)
+
+        self.lock_button = tk.Button(
+            self.header,
+            text="锁定",
+            command=self.toggle_lock,
+            bg="#2b2b2b",
+            fg="#f0f0f0",
+            activebackground="#3a3a3a",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=8,
+            pady=2,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.lock_button.pack(side="right", padx=8, pady=4)
 
         self.mode_label = tk.Label(frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", 9), anchor="w", padx=10, pady=2)
         self.mode_label.pack(fill="x")
@@ -111,6 +135,8 @@ class Indicator:
         self.root.update_idletasks()
         self.position_bottom_right()
         self._init_scene()
+        self._bind_drag_for_widget(self.frame)
+        self.root.bind("<Configure>", lambda _e: self.ensure_on_screen())
 
     def position_bottom_right(self) -> None:
         self.root.update_idletasks()
@@ -118,6 +144,51 @@ class Indicator:
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{sw - w - 18}+{sh - h - 58}")
+        self.ensure_on_screen()
+
+    def toggle_lock(self) -> None:
+        self.locked = not self.locked
+        self.lock_button.config(text="锁定" if self.locked else "解锁")
+
+    def _bind_drag_for_widget(self, widget: tk.Widget) -> None:
+        widget.bind("<ButtonPress-1>", self._on_drag_start, add="+")
+        widget.bind("<B1-Motion>", self._on_drag_move, add="+")
+        for child in widget.winfo_children():
+            self._bind_drag_for_widget(child)
+
+    def _on_drag_start(self, event) -> None:
+        if self.locked:
+            return
+        self.drag_start_mouse_x = event.x_root
+        self.drag_start_mouse_y = event.y_root
+        self.drag_start_win_x = self.root.winfo_x()
+        self.drag_start_win_y = self.root.winfo_y()
+
+    def _on_drag_move(self, event) -> None:
+        if self.locked:
+            return
+        dx = event.x_root - self.drag_start_mouse_x
+        dy = event.y_root - self.drag_start_mouse_y
+        new_x = self.drag_start_win_x + dx
+        new_y = self.drag_start_win_y + dy
+        self.root.geometry(f"+{new_x}+{new_y}")
+        self.ensure_on_screen()
+
+    def ensure_on_screen(self) -> None:
+        self.root.update_idletasks()
+        win_w = self.root.winfo_width()
+        win_h = self.root.winfo_height()
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+
+        max_x = max(0, sw - win_w)
+        max_y = max(0, sh - win_h)
+        nx = int(clamp(x, 0, max_x))
+        ny = int(clamp(y, 0, max_y))
+        if nx != x or ny != y:
+            self.root.geometry(f"+{nx}+{ny}")
 
     def _init_scene(self) -> None:
         c = self.canvas
@@ -156,8 +227,14 @@ class Indicator:
         self.canvas.itemconfig(self.brake_box, fill="#ff6b6b" if brake else "#2a2a2a")
 
     def update(self, state: MapperState, mode: int) -> None:
+        mode_names = {
+            1: "方向+线性油刹",
+            2: "方向+按键油刹",
+            3: "仅线性油刹",
+            4: "仅按键油刹",
+        }
         self.status_label.config(text="状态: ON" if state.enabled else "状态: OFF", fg="#7dff9b" if state.enabled else "#ff6b6b")
-        self.mode_label.config(text=f"模式: {mode}  (Shift+V开关 / Alt+Shift+V切模式1-4 / F10重置参考点)")
+        self.mode_label.config(text=f"模式{mode}: {mode_names.get(mode, '未知')}  (Shift+V开关 / Alt+Shift+V切模式 / F10重置参考点)")
         self._draw_lx(state.left_x)
         self._draw_ry(state.right_y)
         self._draw_pedals(state.gas_active, state.brake_active)
