@@ -31,6 +31,8 @@ class AppConfig:
     brake_mouse_button: str = "left"
     gear_up_button: str = "right_shoulder"
     gear_down_button: str = "left_shoulder"
+    relative_mouse_mode: bool = True
+    hide_cursor_on_enable: bool = True
 
 
 @dataclass
@@ -103,6 +105,22 @@ def resolve_gamepad_button(name: str):
     return mapping.get(n, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER)
 
 
+def set_cursor_visible(visible: bool) -> None:
+    try:
+        user32 = ctypes.windll.user32
+        # ShowCursor uses an internal display counter. Loop to enforce state.
+        if visible:
+            for _ in range(8):
+                if user32.ShowCursor(True) >= 0:
+                    break
+        else:
+            for _ in range(8):
+                if user32.ShowCursor(False) < 0:
+                    break
+    except Exception:
+        pass
+
+
 def load_config() -> AppConfig:
     cfg = AppConfig()
     parser = configparser.ConfigParser()
@@ -129,6 +147,8 @@ def load_config() -> AppConfig:
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
+        cfg.relative_mouse_mode = parser.getboolean(section, "relative_mouse_mode", fallback=cfg.relative_mouse_mode)
+        cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
@@ -157,6 +177,8 @@ def save_default_config(cfg: AppConfig) -> None:
         "brake_mouse_button": cfg.brake_mouse_button,
         "gear_up_button": cfg.gear_up_button,
         "gear_down_button": cfg.gear_down_button,
+        "relative_mouse_mode": str(cfg.relative_mouse_mode).lower(),
+        "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
@@ -391,6 +413,12 @@ class MouseToVirtualGamepad:
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
         self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
         self.gear_down_btn = resolve_gamepad_button(self.config.gear_down_button)
+        self.cursor_hidden = False
+        self.relative_center = None
+        self.ignore_move_events = 0
+        self.raw_last_pos = None
+        self.axis_x = 0.0
+        self.axis_y = 0.0
 
         try:
             self.pad = vg.VX360Gamepad()
@@ -407,12 +435,54 @@ class MouseToVirtualGamepad:
             self.state.left_x = 0.0
             self.state.right_y = 0.0
 
+    def _virtual_screen_center(self) -> tuple[int, int]:
+        try:
+            user32 = ctypes.windll.user32
+            vx = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+            vy = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+            vw = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+            vh = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+            return (int(vx + vw // 2), int(vy + vh // 2))
+        except Exception:
+            x, y = self.mouse_controller.position
+            return (int(x), int(y))
+
+    def _warp_to_center(self) -> None:
+        if self.relative_center is None:
+            self.relative_center = self._virtual_screen_center()
+        cx, cy = self.relative_center
+        self.ignore_move_events = 2
+        self.mouse_controller.position = (cx, cy)
+        self.raw_last_pos = (cx, cy)
+
+    def _set_mapper_enabled(self, enabled: bool) -> None:
+        self.state.enabled = enabled
+        if enabled:
+            self.axis_x = 0.0
+            self.axis_y = 0.0
+            self.set_reference_to_current_mouse()
+            if self.config.hide_cursor_on_enable and not self.cursor_hidden:
+                set_cursor_visible(False)
+                self.cursor_hidden = True
+            if self.config.relative_mouse_mode:
+                self.relative_center = self._virtual_screen_center()
+                self._warp_to_center()
+            self.state.last_error = "已开启"
+        else:
+            if self.cursor_hidden:
+                set_cursor_visible(True)
+                self.cursor_hidden = False
+            self.reset_all()
+            self.state.last_error = "已关闭并回中"
+
     def reset_all(self) -> None:
         self.set_reference_to_current_mouse()
         self.right_button_down = False
         self.left_button_down = False
         self.gear_up_until = 0.0
         self.gear_down_until = 0.0
+        self.axis_x = 0.0
+        self.axis_y = 0.0
         self.state.gas_active = False
         self.state.brake_active = False
         self.state.rt = 0.0
@@ -438,13 +508,7 @@ class MouseToVirtualGamepad:
             return
 
         if self.toggle_combo and token in self.toggle_combo and self.toggle_combo.issubset(self.pressed_keys):
-            self.state.enabled = not self.state.enabled
-            if self.state.enabled:
-                self.set_reference_to_current_mouse()
-                self.state.last_error = "已开启"
-            else:
-                self.reset_all()
-                self.state.last_error = "已关闭并回中"
+            self._set_mapper_enabled(not self.state.enabled)
 
     def on_key_release(self, key) -> None:
         token = normalize_key_token(key)
@@ -452,8 +516,27 @@ class MouseToVirtualGamepad:
             self.pressed_keys.discard(token)
 
     def on_mouse_move(self, x: int, y: int) -> None:
+        do_warp = False
         with self.lock:
-            self.current_pos = (x, y)
+            if self.state.enabled and self.config.relative_mouse_mode:
+                if self.ignore_move_events > 0:
+                    self.ignore_move_events -= 1
+                    self.raw_last_pos = (x, y)
+                    return
+                if self.raw_last_pos is None:
+                    self.raw_last_pos = (x, y)
+                    return
+                dx = x - self.raw_last_pos[0]
+                dy = y - self.raw_last_pos[1]
+                self.raw_last_pos = (x, y)
+                self.axis_x = clamp(self.axis_x + (dx / self.config.reference_range_x_px), -1.0, 1.0)
+                self.axis_y = clamp(self.axis_y + (dy / self.config.reference_range_y_px), -1.0, 1.0)
+                do_warp = True
+            else:
+                self.current_pos = (x, y)
+        if do_warp:
+            self._warp_to_center()
+            return
 
     def on_mouse_click(self, x: int, y: int, button, pressed: bool) -> None:
         if button == self.gas_mouse_btn:
@@ -482,7 +565,10 @@ class MouseToVirtualGamepad:
         # mode1/mode2: steering enabled by mouse X
         # mode3/mode4: pedal-only, no steering
         if self.config.control_mode in (1, 2):
-            base_lx = clamp(dx / self.config.reference_range_x_px, -1.0, 1.0)
+            if self.config.relative_mouse_mode:
+                base_lx = self.axis_x
+            else:
+                base_lx = clamp(dx / self.config.reference_range_x_px, -1.0, 1.0)
             abs_base_lx = abs(base_lx)
             if abs_base_lx > 0.0:
                 abs_lx = self.config.min_output_x + (1.0 - self.config.min_output_x) * abs_base_lx
@@ -496,7 +582,10 @@ class MouseToVirtualGamepad:
         # mode1/mode3: linear RT/LT by mouse Y
         # mode2/mode4: digital RT/LT by mouse buttons
         if self.config.control_mode in (1, 3):
-            pedal = clamp(dy / self.config.reference_range_y_px, -1.0, 1.0)
+            if self.config.relative_mouse_mode:
+                pedal = self.axis_y
+            else:
+                pedal = clamp(dy / self.config.reference_range_y_px, -1.0, 1.0)
             if pedal < 0.0:
                 self.state.rt = abs(pedal)
                 self.state.lt = 0.0
@@ -529,7 +618,7 @@ class MouseToVirtualGamepad:
         # RY no longer controls pedals; keep centered for compatibility.
         self.state.right_y = 0.0
         self.state.debug_text = (
-            f"dx={dx:+d}px dy={dy:+d}px | "
+            f"dx={dx:+d}px dy={dy:+d}px ax={self.axis_x:+.3f} ay={self.axis_y:+.3f} | "
             f"lx={self.state.left_x:+.3f} rt={self.state.rt:.3f} lt={self.state.lt:.3f}"
         )
 
@@ -573,6 +662,9 @@ class MouseToVirtualGamepad:
                 ms_listener.stop()
             except Exception:
                 pass
+            if self.cursor_hidden:
+                set_cursor_visible(True)
+                self.cursor_hidden = False
             self.reset_all()
 
     def run(self) -> None:
