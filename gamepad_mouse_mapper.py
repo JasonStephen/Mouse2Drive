@@ -23,6 +23,14 @@ class AppConfig:
     min_output_x: float = 0.23
     debug_mode: bool = False
     hud_fps: int = 25
+    gear_pulse_ms: int = 45
+    reset_hotkey: str = "f10"
+    toggle_hotkey: str = "shift+v"
+    switch_mode_hotkey: str = "alt+shift+v"
+    gas_mouse_button: str = "right"
+    brake_mouse_button: str = "left"
+    gear_up_button: str = "right_shoulder"
+    gear_down_button: str = "left_shoulder"
 
 
 @dataclass
@@ -30,6 +38,8 @@ class MapperState:
     enabled: bool = False
     left_x: float = 0.0
     right_y: float = 0.0
+    rt: float = 0.0
+    lt: float = 0.0
     gas_active: bool = False
     brake_active: bool = False
     debug_text: str = ""
@@ -43,6 +53,54 @@ def clamp(v: float, lo: float, hi: float) -> float:
 def to_xinput_short(v: float) -> int:
     v = clamp(v, -1.0, 1.0)
     return int(v * 32767) if v >= 0 else int(v * 32768)
+
+
+def parse_hotkey_combo(combo: str) -> set[str]:
+    return {p.strip().lower() for p in combo.split("+") if p.strip()}
+
+
+def normalize_key_token(key) -> str | None:
+    if isinstance(key, keyboard.KeyCode):
+        if key.char:
+            return key.char.lower()
+        return None
+    if isinstance(key, keyboard.Key):
+        name = key.name.lower()
+        if name.startswith("shift"):
+            return "shift"
+        if name.startswith("alt"):
+            return "alt"
+        if name.startswith("ctrl"):
+            return "ctrl"
+        return name
+    return None
+
+
+def resolve_mouse_button(name: str):
+    n = name.strip().lower()
+    mapping = {
+        "left": mouse.Button.left,
+        "right": mouse.Button.right,
+        "middle": mouse.Button.middle,
+    }
+    return mapping.get(n, mouse.Button.right)
+
+
+def resolve_gamepad_button(name: str):
+    n = name.strip().lower()
+    mapping = {
+        "right_shoulder": vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
+        "left_shoulder": vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
+        "a": vg.XUSB_BUTTON.XUSB_GAMEPAD_A,
+        "b": vg.XUSB_BUTTON.XUSB_GAMEPAD_B,
+        "x": vg.XUSB_BUTTON.XUSB_GAMEPAD_X,
+        "y": vg.XUSB_BUTTON.XUSB_GAMEPAD_Y,
+        "dpad_up": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP,
+        "dpad_down": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
+        "dpad_left": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT,
+        "dpad_right": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
+    }
+    return mapping.get(n, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER)
 
 
 def load_config() -> AppConfig:
@@ -63,6 +121,14 @@ def load_config() -> AppConfig:
         cfg.min_output_x = parser.getfloat(section, "min_output_x", fallback=cfg.min_output_x)
         cfg.debug_mode = parser.getboolean(section, "debug_mode", fallback=cfg.debug_mode)
         cfg.hud_fps = parser.getint(section, "hud_fps", fallback=cfg.hud_fps)
+        cfg.gear_pulse_ms = parser.getint(section, "gear_pulse_ms", fallback=cfg.gear_pulse_ms)
+        cfg.reset_hotkey = parser.get(section, "reset_hotkey", fallback=cfg.reset_hotkey)
+        cfg.toggle_hotkey = parser.get(section, "toggle_hotkey", fallback=cfg.toggle_hotkey)
+        cfg.switch_mode_hotkey = parser.get(section, "switch_mode_hotkey", fallback=cfg.switch_mode_hotkey)
+        cfg.gas_mouse_button = parser.get(section, "gas_mouse_button", fallback=cfg.gas_mouse_button)
+        cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
+        cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
+        cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
@@ -70,6 +136,7 @@ def load_config() -> AppConfig:
     cfg.reference_range_y_px = max(1.0, cfg.reference_range_y_px)
     cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 0.95)
     cfg.hud_fps = int(clamp(cfg.hud_fps, 5, 240))
+    cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
     return cfg
 
 
@@ -82,16 +149,25 @@ def save_default_config(cfg: AppConfig) -> None:
         "min_output_x": str(cfg.min_output_x),
         "debug_mode": str(cfg.debug_mode).lower(),
         "hud_fps": str(cfg.hud_fps),
+        "gear_pulse_ms": str(cfg.gear_pulse_ms),
+        "reset_hotkey": cfg.reset_hotkey,
+        "toggle_hotkey": cfg.toggle_hotkey,
+        "switch_mode_hotkey": cfg.switch_mode_hotkey,
+        "gas_mouse_button": cfg.gas_mouse_button,
+        "brake_mouse_button": cfg.brake_mouse_button,
+        "gear_up_button": cfg.gear_up_button,
+        "gear_down_button": cfg.gear_down_button,
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
 
 
 class Indicator:
-    def __init__(self, debug_mode: bool = False, hud_fps: int = 25) -> None:
+    def __init__(self, debug_mode: bool = False, hud_fps: int = 25, min_output_x: float = 0.23) -> None:
         self.debug_mode = debug_mode
         self.hud_fps = int(clamp(hud_fps, 5, 240))
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
+        self.min_output_x = clamp(min_output_x, 0.0, 0.95)
         self.locked = True
         self.drag_start_mouse_x = 0
         self.drag_start_mouse_y = 0
@@ -217,7 +293,7 @@ class Indicator:
         self.lx_center = c.create_line(190, 10, 190, 30, fill="#9e9e9e", width=2)
         self.lx_fill = c.create_rectangle(190, 13, 190, 27, outline="", fill="#67b7ff")
 
-        # RY vertical slider
+        # RY (kept as centered indicator; pedals are RT/LT now)
         c.create_text(24, 72, text="R", fill="#cfd8dc", font=("Segoe UI", 9, "bold"))
         self.ry_track = c.create_rectangle(170, 40, 210, 120, outline="#4a4a4a", fill="#262626")
         self.ry_center = c.create_line(168, 80, 212, 80, fill="#9e9e9e", width=2)
@@ -230,9 +306,21 @@ class Indicator:
         self.gas_box = c.create_rectangle(270, 122, 340, 136, outline="#8a8a8a", fill="#2a2a2a")
 
     def _draw_lx(self, lx: float) -> None:
+        # Display scale for steering:
+        # [-1, -min); 0; (min, 1]
+        # i.e. re-normalize non-zero output so min_output starts visually near center.
+        ax = abs(lx)
+        if ax <= 0.0:
+            view = 0.0
+        elif ax <= self.min_output_x:
+            view = 0.0
+        else:
+            den = max(1e-6, 1.0 - self.min_output_x)
+            view = clamp((ax - self.min_output_x) / den, 0.0, 1.0)
+            view = view if lx >= 0 else -view
         cx = 190
-        left = cx + int(150 * min(0.0, lx))
-        right = cx + int(150 * max(0.0, lx))
+        left = cx + int(150 * min(0.0, view))
+        right = cx + int(150 * max(0.0, view))
         self.canvas.coords(self.lx_fill, left, 13, right, 27)
 
     def _draw_ry(self, ry: float) -> None:
@@ -282,14 +370,23 @@ class MouseToVirtualGamepad:
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
 
-        self.pressed_keys: set = set()
+        self.pressed_keys: set[str] = set()
         self.reference_pos: tuple[int, int] | None = None
         self.current_pos: tuple[int, int] | None = None
 
         self.right_button_down = False
         self.left_button_down = False
+        self.gear_up_until = 0.0
+        self.gear_down_until = 0.0
 
         self.mouse_controller = mouse.Controller()
+        self.reset_combo = parse_hotkey_combo(self.config.reset_hotkey)
+        self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
+        self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
+        self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
+        self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
+        self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
+        self.gear_down_btn = resolve_gamepad_button(self.config.gear_down_button)
 
         try:
             self.pad = vg.VX360Gamepad()
@@ -310,41 +407,33 @@ class MouseToVirtualGamepad:
         self.set_reference_to_current_mouse()
         self.right_button_down = False
         self.left_button_down = False
+        self.gear_up_until = 0.0
+        self.gear_down_until = 0.0
         self.state.gas_active = False
         self.state.brake_active = False
+        self.state.rt = 0.0
+        self.state.lt = 0.0
         self.push_to_gamepad()
 
     def on_key_press(self, key) -> None:
-        self.pressed_keys.add(key)
+        token = normalize_key_token(key)
+        if token is None:
+            return
+        self.pressed_keys.add(token)
 
-        if key == RESET_HOTKEY:
+        if self.reset_combo and self.reset_combo.issubset(self.pressed_keys):
             self.reset_all()
             self.state.last_error = "已复位"
             return
 
-        shift_pressed = (
-            keyboard.Key.shift in self.pressed_keys
-            or keyboard.Key.shift_l in self.pressed_keys
-            or keyboard.Key.shift_r in self.pressed_keys
-        )
-        alt_pressed = (
-            keyboard.Key.alt in self.pressed_keys
-            or keyboard.Key.alt_l in self.pressed_keys
-            or keyboard.Key.alt_r in self.pressed_keys
-            or keyboard.Key.alt_gr in self.pressed_keys
-        )
-        is_v_key = (key == keyboard.KeyCode.from_char('v') or key == keyboard.KeyCode.from_char('V'))
-
-        # Alt+Shift+V: switch control mode (1 -> 2 -> 3 -> 4 -> 1)
-        if shift_pressed and alt_pressed and is_v_key:
+        if self.switch_mode_combo and token in self.switch_mode_combo and self.switch_mode_combo.issubset(self.pressed_keys):
             self.config.control_mode += 1
             if self.config.control_mode > 4:
                 self.config.control_mode = 1
             self.state.last_error = f"已切换到模式{self.config.control_mode}"
             return
 
-        # Shift+V: enable/disable mapper
-        if shift_pressed and is_v_key:
+        if self.toggle_combo and token in self.toggle_combo and self.toggle_combo.issubset(self.pressed_keys):
             self.state.enabled = not self.state.enabled
             if self.state.enabled:
                 self.set_reference_to_current_mouse()
@@ -354,17 +443,29 @@ class MouseToVirtualGamepad:
                 self.state.last_error = "已关闭并回中"
 
     def on_key_release(self, key) -> None:
-        self.pressed_keys.discard(key)
+        token = normalize_key_token(key)
+        if token is not None:
+            self.pressed_keys.discard(token)
 
     def on_mouse_move(self, x: int, y: int) -> None:
         with self.lock:
             self.current_pos = (x, y)
 
     def on_mouse_click(self, x: int, y: int, button, pressed: bool) -> None:
-        if button == mouse.Button.right:
+        if button == self.gas_mouse_btn:
             self.right_button_down = pressed
-        elif button == mouse.Button.left:
+        elif button == self.brake_mouse_btn:
             self.left_button_down = pressed
+
+    def on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
+        if not self.state.enabled:
+            return
+        now = time.time()
+        pulse = self.config.gear_pulse_ms / 1000.0
+        if dy > 0:
+            self.gear_up_until = max(self.gear_up_until, now + pulse)
+        elif dy < 0:
+            self.gear_down_until = max(self.gear_down_until, now + pulse)
 
     def compute_state(self) -> None:
         if self.reference_pos is None or self.current_pos is None:
@@ -387,45 +488,70 @@ class MouseToVirtualGamepad:
         else:
             lx = 0.0
 
-        # Pedals:
-        # mode1/mode3: linear pedal by mouse Y
-        # mode2/mode4: digital pedal by mouse buttons
+        # Pedals are now RT/LT in all modes.
+        # mode1/mode3: linear RT/LT by mouse Y
+        # mode2/mode4: digital RT/LT by mouse buttons
         if self.config.control_mode in (1, 3):
-            ry = clamp(dy / self.config.reference_range_y_px, -1.0, 1.0)
-            self.state.gas_active = ry < 0.0
-            self.state.brake_active = ry > 0.0
+            pedal = clamp(dy / self.config.reference_range_y_px, -1.0, 1.0)
+            if pedal < 0.0:
+                self.state.rt = abs(pedal)
+                self.state.lt = 0.0
+            elif pedal > 0.0:
+                self.state.rt = 0.0
+                self.state.lt = abs(pedal)
+            else:
+                self.state.rt = 0.0
+                self.state.lt = 0.0
+            self.state.gas_active = self.state.rt > 0.0
+            self.state.brake_active = self.state.lt > 0.0
         else:
             if self.right_button_down and not self.left_button_down:
-                ry = -1.0
+                self.state.rt = 1.0
+                self.state.lt = 0.0
                 self.state.gas_active = True
                 self.state.brake_active = False
             elif self.left_button_down and not self.right_button_down:
-                ry = 1.0
+                self.state.rt = 0.0
+                self.state.lt = 1.0
                 self.state.gas_active = False
                 self.state.brake_active = True
             else:
-                ry = 0.0
+                self.state.rt = 0.0
+                self.state.lt = 0.0
                 self.state.gas_active = False
                 self.state.brake_active = False
 
         self.state.left_x = lx
-        self.state.right_y = ry
-        self.state.debug_text = f"dx={dx:+d}px dy={dy:+d}px | lx={self.state.left_x:+.3f} ry={self.state.right_y:+.3f}"
+        # RY no longer controls pedals; keep centered for compatibility.
+        self.state.right_y = 0.0
+        self.state.debug_text = (
+            f"dx={dx:+d}px dy={dy:+d}px | "
+            f"lx={self.state.left_x:+.3f} rt={self.state.rt:.3f} lt={self.state.lt:.3f}"
+        )
 
     def push_to_gamepad(self) -> None:
         if self.pad is None:
             return
 
         lx = to_xinput_short(self.state.left_x)
-        ry = to_xinput_short(-self.state.right_y)
+        ry = to_xinput_short(0.0)
+        rt = int(clamp(self.state.rt, 0.0, 1.0) * 255)
+        lt = int(clamp(self.state.lt, 0.0, 1.0) * 255)
+        now = time.time()
+        gear_up_pressed = now < self.gear_up_until
+        gear_down_pressed = now < self.gear_down_until
 
         self.pad.left_joystick(x_value=lx, y_value=0)
         self.pad.right_joystick(x_value=0, y_value=ry)
+        self.pad.right_trigger(value=rt)
+        self.pad.left_trigger(value=lt)
+        self.pad.press_button(button=self.gear_up_btn) if gear_up_pressed else self.pad.release_button(button=self.gear_up_btn)
+        self.pad.press_button(button=self.gear_down_btn) if gear_down_pressed else self.pad.release_button(button=self.gear_down_btn)
         self.pad.update()
 
     def worker_loop(self) -> None:
         kb_listener = keyboard.Listener(on_press=self.on_key_press, on_release=self.on_key_release)
-        ms_listener = mouse.Listener(on_move=self.on_mouse_move, on_click=self.on_mouse_click)
+        ms_listener = mouse.Listener(on_move=self.on_mouse_move, on_click=self.on_mouse_click, on_scroll=self.on_mouse_scroll)
         kb_listener.start()
         ms_listener.start()
 
@@ -446,7 +572,11 @@ class MouseToVirtualGamepad:
             self.reset_all()
 
     def run(self) -> None:
-        indicator = Indicator(debug_mode=self.config.debug_mode, hud_fps=self.config.hud_fps)
+        indicator = Indicator(
+            debug_mode=self.config.debug_mode,
+            hud_fps=self.config.hud_fps,
+            min_output_x=self.config.min_output_x,
+        )
         indicator.root.protocol("WM_DELETE_WINDOW", self.stop_event.set)
 
         worker = threading.Thread(target=self.worker_loop, daemon=True)
