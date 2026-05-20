@@ -3,6 +3,7 @@ import ctypes
 import threading
 import time
 import tkinter as tk
+from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,8 @@ class AppConfig:
     gear_pulse_ms: int = 45
     toggle_hotkey: str = "shift+v"
     switch_mode_hotkey: str = "alt+shift+v"
+    toggle_fullscreen_hotkey: str = "alt+f"
+    cycle_fullscreen_layout_hotkey: str = "alt+h"
     gas_mouse_button: str = "right"
     brake_mouse_button: str = "left"
     gear_up_button: str = "right_shoulder"
@@ -119,6 +122,85 @@ def set_cursor_visible(visible: bool) -> None:
         pass
 
 
+def set_window_clickthrough(hwnd: int, enabled: bool) -> None:
+    try:
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        WS_EX_NOACTIVATE = 0x08000000
+        user32 = ctypes.windll.user32
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        if enabled:
+            style = style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        else:
+            style = style & ~WS_EX_TRANSPARENT & ~WS_EX_NOACTIVATE
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    except Exception:
+        pass
+
+
+def _hex_to_colorref(hex_color: str) -> int:
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return 0
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    return (b << 16) | (g << 8) | r
+
+
+def set_window_colorkey(hwnd: int, hex_color: str) -> bool:
+    try:
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        LWA_COLORKEY = 0x00000001
+        user32 = ctypes.windll.user32
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+        key = _hex_to_colorref(hex_color)
+        return bool(user32.SetLayeredWindowAttributes(hwnd, key, 0, LWA_COLORKEY))
+    except Exception:
+        return False
+
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", RECT),
+        ("rcWork", RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+def get_monitor_rect_from_point(x: int, y: int) -> tuple[int, int, int, int]:
+    try:
+        user32 = ctypes.windll.user32
+        pt = POINT(int(x), int(y))
+        MONITOR_DEFAULTTONEAREST = 2
+        hmon = user32.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+        if not hmon:
+            raise RuntimeError("MonitorFromPoint failed")
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        if not user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            raise RuntimeError("GetMonitorInfoW failed")
+        left = int(mi.rcMonitor.left)
+        top = int(mi.rcMonitor.top)
+        width = int(mi.rcMonitor.right - mi.rcMonitor.left)
+        height = int(mi.rcMonitor.bottom - mi.rcMonitor.top)
+        return (left, top, max(1, width), max(1, height))
+    except Exception:
+        return (0, 0, 0, 0)
+
+
 def load_config() -> AppConfig:
     cfg = AppConfig()
     parser = configparser.ConfigParser()
@@ -140,6 +222,8 @@ def load_config() -> AppConfig:
         cfg.gear_pulse_ms = parser.getint(section, "gear_pulse_ms", fallback=cfg.gear_pulse_ms)
         cfg.toggle_hotkey = parser.get(section, "toggle_hotkey", fallback=cfg.toggle_hotkey)
         cfg.switch_mode_hotkey = parser.get(section, "switch_mode_hotkey", fallback=cfg.switch_mode_hotkey)
+        cfg.toggle_fullscreen_hotkey = parser.get(section, "toggle_fullscreen_hotkey", fallback=cfg.toggle_fullscreen_hotkey)
+        cfg.cycle_fullscreen_layout_hotkey = parser.get(section, "cycle_fullscreen_layout_hotkey", fallback=cfg.cycle_fullscreen_layout_hotkey)
         cfg.gas_mouse_button = parser.get(section, "gas_mouse_button", fallback=cfg.gas_mouse_button)
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
@@ -170,6 +254,8 @@ def save_default_config(cfg: AppConfig) -> None:
         "gear_pulse_ms": str(cfg.gear_pulse_ms),
         "toggle_hotkey": cfg.toggle_hotkey,
         "switch_mode_hotkey": cfg.switch_mode_hotkey,
+        "toggle_fullscreen_hotkey": cfg.toggle_fullscreen_hotkey,
+        "cycle_fullscreen_layout_hotkey": cfg.cycle_fullscreen_layout_hotkey,
         "gas_mouse_button": cfg.gas_mouse_button,
         "brake_mouse_button": cfg.brake_mouse_button,
         "gear_up_button": cfg.gear_up_button,
@@ -182,28 +268,17 @@ def save_default_config(cfg: AppConfig) -> None:
 
 
 class Indicator:
-    def __init__(
-        self,
-        debug_mode: bool = False,
-        hud_fps: int = 25,
-        min_output_x: float = 0.23,
-        windows_scale: float = 1.0,
-    ) -> None:
+    def __init__(self, debug_mode: bool = False, hud_fps: int = 25, min_output_x: float = 0.23, windows_scale: float = 1.0) -> None:
         self.debug_mode = debug_mode
         self.hud_fps = int(clamp(hud_fps, 5, 240))
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
         self.min_output_x = clamp(min_output_x, 0.0, 0.95)
-        # Keep text larger even at 100% scale to improve readability.
         self.ui_scale = max(1.15, windows_scale * 1.15)
-        self.base_width = 390
-        self.base_height_normal = 180
-        self.base_height_debug = 205
-        self.win_width = int(round(self.base_width * self.ui_scale))
-        self.win_height = int(round((self.base_height_debug if self.debug_mode else self.base_height_normal) * self.ui_scale))
-        self.canvas_width = max(360, int(round(360 * self.ui_scale)))
-        self.canvas_height = max(98, int(round(98 * self.ui_scale)))
-        self.pad_x = max(8, int(round(10 * self.ui_scale)))
-        self.pad_y = max(3, int(round(4 * self.ui_scale)))
+        self.fullscreen_mode = False
+        self.pedal_layout = 0
+        self.fullscreen_rect: tuple[int, int, int, int] | None = None
+        self.scene = {}
+        self.fullscreen_bg_key = "#00ff00"
         self.locked = True
         self.drag_start_mouse_x = 0
         self.drag_start_mouse_y = 0
@@ -215,66 +290,49 @@ class Indicator:
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
 
-        frame = tk.Frame(self.root, bg="#1f1f1f", bd=1, relief="solid")
-        frame.pack(fill="both", expand=True)
-        self.frame = frame
-
-        self.header = tk.Frame(frame, bg="#1f1f1f")
+        self.frame = tk.Frame(self.root, bg="#1f1f1f", bd=1, relief="solid")
+        self.frame.pack(fill="both", expand=True)
+        self.header = tk.Frame(self.frame, bg="#1f1f1f")
         self.header.pack(fill="x")
-
-        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(10), "bold"), anchor="w", padx=self.pad_x, pady=self.pad_y)
+        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(10), "bold"), anchor="w")
         self.status_label.pack(side="left", fill="x", expand=True)
-
-        self.lock_button = tk.Button(
-            self.header,
-            text="锁定",
-            command=self.toggle_lock,
-            bg="#2b2b2b",
-            fg="#f0f0f0",
-            activebackground="#3a3a3a",
-            activeforeground="#ffffff",
-            bd=0,
-            padx=max(6, int(round(8 * self.ui_scale))),
-            pady=max(1, int(round(2 * self.ui_scale))),
-            font=("Segoe UI", self._font(8), "bold"),
-        )
-        self.lock_button.pack(side="right", padx=self.pad_x, pady=self.pad_y)
-
-        self.mode_label = tk.Label(
-            frame,
-            text="模式: 1",
-            fg="#b7d8ff",
-            bg="#1f1f1f",
-            font=("Segoe UI", self._font(9)),
-            anchor="w",
-            justify="left",
-            wraplength=max(200, self.win_width - self.pad_x * 2),
-            padx=self.pad_x,
-            pady=max(1, int(round(2 * self.ui_scale))),
-        )
+        self.lock_button = tk.Button(self.header, text="锁定", command=self.toggle_lock, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=("Segoe UI", self._font(8), "bold"))
+        self.lock_button.pack(side="right")
+        self.mode_label = tk.Label(self.frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", self._font(9)), anchor="w", justify="left")
         self.mode_label.pack(fill="x")
-
-        self.canvas = tk.Canvas(frame, width=self.canvas_width, height=self.canvas_height, bg="#171717", highlightthickness=0)
-        self.canvas.pack(fill="x", padx=self.pad_x, pady=self.pad_y)
-
-        self.error_label = tk.Label(frame, text="", fg="#ffcc66", bg="#1f1f1f", font=("Segoe UI", self._font(8)), anchor="w", justify="left", wraplength=max(200, self.win_width - self.pad_x * 2), padx=self.pad_x, pady=max(1, int(round(2 * self.ui_scale))))
+        self.canvas = tk.Canvas(self.frame, width=100, height=100, bg="#171717", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        self.error_label = tk.Label(self.frame, text="", fg="#ffcc66", bg="#1f1f1f", font=("Segoe UI", self._font(8)), anchor="w", justify="left")
         self.error_label.pack(fill="x")
-        self.debug_label = tk.Label(frame, text="", fg="#9fd6ff", bg="#1f1f1f", font=("Consolas", self._font(8)), anchor="w", justify="left", wraplength=max(200, self.win_width - self.pad_x * 2), padx=self.pad_x, pady=max(1, int(round(2 * self.ui_scale))))
+        self.debug_label = tk.Label(self.frame, text="", fg="#9fd6ff", bg="#1f1f1f", font=("Consolas", self._font(8)), anchor="w", justify="left")
         self.debug_label.pack(fill="x")
-
-        self.root.update_idletasks()
-        self.position_bottom_right()
-        self._init_scene()
+        self.window_pad_x = max(8, int(round(10 * self.ui_scale)))
+        self.window_pad_y = max(3, int(round(4 * self.ui_scale)))
+        self.lock_button_pack_kwargs = {"side": "right", "padx": max(8, int(round(10 * self.ui_scale))), "pady": max(3, int(round(4 * self.ui_scale)))}
         self._bind_drag_for_widget(self.frame)
         self.root.bind("<Configure>", lambda _e: self.ensure_on_screen())
+        self.root.update_idletasks()
+        self.apply_view_mode(False, 0)
+        self._init_scene()
 
     def position_bottom_right(self) -> None:
         self.root.update_idletasks()
-        w, h = self.win_width, self.win_height
+        w = int(round(390 * self.ui_scale))
+        h = int(round((205 if self.debug_mode else 180) * self.ui_scale))
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{sw - w - 18}+{sh - h - 58}")
         self.ensure_on_screen()
+
+    def set_fullscreen_rect(self, rect: tuple[int, int, int, int] | None) -> None:
+        self.fullscreen_rect = rect
+
+    def position_fullscreen_overlay(self) -> None:
+        if self.fullscreen_rect is not None:
+            vx, vy, vw, vh = self.fullscreen_rect
+        else:
+            vx, vy, vw, vh = 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry(f"{int(vw)}x{int(vh)}+{int(vx)}+{int(vy)}")
 
     def toggle_lock(self) -> None:
         self.locked = not self.locked
@@ -332,40 +390,78 @@ class Indicator:
         if nx != x or ny != y:
             self.root.geometry(f"+{nx}+{ny}")
 
-    def _init_scene(self) -> None:
+    def _clear_scene(self) -> None:
+        self.canvas.delete("all")
+        self.scene = {}
+
+    def _init_scene_windowed(self) -> None:
         c = self.canvas
         s = self.ui_scale
         x = lambda v: int(round(v * s))
         y = lambda v: int(round(v * s))
+        c.configure(width=max(360, x(360)), height=max(98, y(98)))
+        c.create_text(x(24), y(17), text="L", fill="#cfd8dc", font=("Segoe UI", self._font(9), "bold"))
+        self.scene["lx_track"] = c.create_rectangle(x(40), y(10), x(340), y(24), outline="#4a4a4a", fill="#262626")
+        cx = x(190)
+        c.create_line(cx, y(8), cx, y(26), fill="#9e9e9e", width=max(1, int(round(2 * s))))
+        self.scene["lx_fill"] = c.create_rectangle(cx, y(11), cx, y(23), outline="", fill="#67b7ff")
+        c.create_text(x(34), y(68), text="刹车", fill="#ffcdd2", font=("Segoe UI", self._font(9)))
+        self.scene["brake_track"] = c.create_rectangle(x(60), y(60), x(150), y(74), outline="#8a8a8a", fill="#2a2a2a")
+        self.scene["brake_fill"] = c.create_rectangle(x(61), y(61), x(61), y(73), outline="", fill="#ff6b6b")
+        self.scene["brake_box"] = c.create_rectangle(x(154), y(60), x(166), y(74), outline="#8a8a8a", fill="#2a2a2a")
+        c.create_text(x(222), y(68), text="油门", fill="#c8e6c9", font=("Segoe UI", self._font(9)))
+        self.scene["gas_track"] = c.create_rectangle(x(248), y(60), x(338), y(74), outline="#8a8a8a", fill="#2a2a2a")
+        self.scene["gas_fill"] = c.create_rectangle(x(249), y(61), x(249), y(73), outline="", fill="#37d45c")
+        self.scene["gas_box"] = c.create_rectangle(x(342), y(60), x(354), y(74), outline="#8a8a8a", fill="#2a2a2a")
 
-        lx_text_x = x(24)
-        lx_text_y = y(17)
-        lx_x0, lx_y0, lx_x1, lx_y1 = x(40), y(10), x(340), y(24)
-        lx_center_x = x(190)
-        lx_fill_y0, lx_fill_y1 = y(11), y(23)
-        brake_label_x, brake_label_y = x(34), y(68)
-        brake_x0, brake_y0, brake_x1, brake_y1 = x(60), y(60), x(150), y(74)
-        brake_box_x0, brake_box_x1 = x(154), x(166)
-        gas_label_x, gas_label_y = x(222), y(68)
-        gas_x0, gas_y0, gas_x1, gas_y1 = x(248), y(60), x(338), y(74)
-        gas_box_x0, gas_box_x1 = x(342), x(354)
+    def _init_scene_fullscreen(self) -> None:
+        c = self.canvas
+        self.root.update_idletasks()
+        sw = max(1, self.root.winfo_width())
+        sh = max(1, self.root.winfo_height())
+        c.configure(width=sw, height=sh)
+        # HUD text anchors
+        self.scene["status_text"] = c.create_text(28, 28, text="状态: OFF", fill="#ffffff", font=("Segoe UI", self._font(20), "bold"), anchor="nw")
+        self.scene["mode_text"] = c.create_text(28, 28 + self._font(20) + 14, text="模式: -", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="nw")
+        self.scene["error_text"] = c.create_text(28, sh - 28, text="", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="sw")
+        self.scene["debug_text"] = c.create_text(28, sh - 28 - self._font(16) - 10, text="", fill="#d6f0ff", font=("Consolas", self._font(12)), anchor="sw")
+        center_x = sw // 2
+        lx_w = int(sw * 0.34)
+        lx_h = max(20, int(sh * 0.028))
+        lx_y = int(sh * 0.75)
+        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2, lx_y - lx_h // 2, center_x + lx_w // 2, lx_y + lx_h // 2, outline="#8a8a8a", fill="#1f1f1f")
+        c.create_line(center_x, lx_y - lx_h // 2 - 8, center_x, lx_y + lx_h // 2 + 8, fill="#cfd8dc", width=2)
+        self.scene["lx_fill"] = c.create_rectangle(center_x, lx_y - lx_h // 2 + 2, center_x, lx_y + lx_h // 2 - 2, outline="", fill="#67b7ff")
+        bar_h = int(sh * 0.26)
+        bar_w = max(18, int(sw * 0.012))
+        bars_y0 = int(sh * 0.64) - bar_h // 2
+        bars_y1 = bars_y0 + bar_h
+        gap = max(28, int(sw * 0.02))
+        left_x = int(sw * 0.16)
+        right_x = int(sw * 0.84)
+        mid_left = center_x - gap // 2 - bar_w
+        mid_right = center_x + gap // 2
+        if self.pedal_layout == 0:
+            bx, gx = left_x, right_x
+        elif self.pedal_layout == 1:
+            bx, gx = left_x, left_x + gap + bar_w
+        else:
+            bx, gx = right_x - gap - bar_w, right_x
+        self.scene["brake_track"] = c.create_rectangle(bx, bars_y0, bx + bar_w, bars_y1, outline="#8a8a8a", fill="#2a2a2a")
+        self.scene["brake_fill"] = c.create_rectangle(bx + 1, bars_y1 - 1, bx + bar_w - 1, bars_y1 - 1, outline="", fill="#ff6b6b")
+        self.scene["gas_track"] = c.create_rectangle(gx, bars_y0, gx + bar_w, bars_y1, outline="#8a8a8a", fill="#2a2a2a")
+        self.scene["gas_fill"] = c.create_rectangle(gx + 1, bars_y1 - 1, gx + bar_w - 1, bars_y1 - 1, outline="", fill="#37d45c")
+        c.create_text(bx + bar_w // 2, bars_y1 + 20, text="刹车", fill="#ffcdd2", font=("Segoe UI", self._font(11)))
+        c.create_text(gx + bar_w // 2, bars_y1 + 20, text="油门", fill="#c8e6c9", font=("Segoe UI", self._font(11)))
+        self.scene["brake_box"] = c.create_rectangle(bx - 20, bars_y0, bx - 8, bars_y0 + 12, outline="#8a8a8a", fill="#2a2a2a")
+        self.scene["gas_box"] = c.create_rectangle(gx + bar_w + 8, bars_y0, gx + bar_w + 20, bars_y0 + 12, outline="#8a8a8a", fill="#2a2a2a")
 
-        # LX horizontal slider
-        c.create_text(lx_text_x, lx_text_y, text="L", fill="#cfd8dc", font=("Segoe UI", self._font(9), "bold"))
-        self.lx_track = c.create_rectangle(lx_x0, lx_y0, lx_x1, lx_y1, outline="#4a4a4a", fill="#262626")
-        self.lx_center = c.create_line(lx_center_x, y(8), lx_center_x, y(26), fill="#9e9e9e", width=max(1, int(round(2 * s))))
-        self.lx_fill = c.create_rectangle(lx_center_x, lx_fill_y0, lx_center_x, lx_fill_y1, outline="", fill="#67b7ff")
-
-        # LT/RT value sliders + active indicators
-        c.create_text(brake_label_x, brake_label_y, text="刹车", fill="#ffcdd2", font=("Segoe UI", self._font(9)))
-        self.brake_track = c.create_rectangle(brake_x0, brake_y0, brake_x1, brake_y1, outline="#8a8a8a", fill="#2a2a2a")
-        self.brake_fill = c.create_rectangle(brake_x0 + 1, brake_y0 + 1, brake_x0 + 1, brake_y1 - 1, outline="", fill="#ff6b6b")
-        self.brake_box = c.create_rectangle(brake_box_x0, brake_y0, brake_box_x1, brake_y1, outline="#8a8a8a", fill="#2a2a2a")
-
-        c.create_text(gas_label_x, gas_label_y, text="油门", fill="#c8e6c9", font=("Segoe UI", self._font(9)))
-        self.gas_track = c.create_rectangle(gas_x0, gas_y0, gas_x1, gas_y1, outline="#8a8a8a", fill="#2a2a2a")
-        self.gas_fill = c.create_rectangle(gas_x0 + 1, gas_y0 + 1, gas_x0 + 1, gas_y1 - 1, outline="", fill="#37d45c")
-        self.gas_box = c.create_rectangle(gas_box_x0, gas_y0, gas_box_x1, gas_y1, outline="#8a8a8a", fill="#2a2a2a")
+    def _init_scene(self) -> None:
+        self._clear_scene()
+        if self.fullscreen_mode:
+            self._init_scene_fullscreen()
+        else:
+            self._init_scene_windowed()
 
     def _font(self, base_size: int) -> int:
         return max(8, int(round(base_size * self.ui_scale)))
@@ -383,30 +479,123 @@ class Indicator:
             den = max(1e-6, 1.0 - self.min_output_x)
             view = clamp((ax - self.min_output_x) / den, 0.0, 1.0)
             view = view if lx >= 0 else -view
-        x0, y0, x1, y1 = self.canvas.coords(self.lx_track)
+        x0, y0, x1, y1 = self.canvas.coords(self.scene["lx_track"])
         cx = (x0 + x1) / 2.0
         half = (x1 - x0) / 2.0
         left = cx + (half * min(0.0, view))
         right = cx + (half * max(0.0, view))
-        self.canvas.coords(self.lx_fill, left, y0 + 1, right, y1 - 1)
+        self.canvas.coords(self.scene["lx_fill"], left, y0 + 1, right, y1 - 1)
 
     def _draw_pedals(self, gas: bool, brake: bool, rt: float, lt: float) -> None:
         lt = clamp(lt, 0.0, 1.0)
         rt = clamp(rt, 0.0, 1.0)
 
-        brake_x0, brake_y0, brake_x1, brake_y1 = self.canvas.coords(self.brake_track)
-        gas_x0, gas_y0, gas_x1, gas_y1 = self.canvas.coords(self.gas_track)
+        brake_x0, brake_y0, brake_x1, brake_y1 = self.canvas.coords(self.scene["brake_track"])
+        gas_x0, gas_y0, gas_x1, gas_y1 = self.canvas.coords(self.scene["gas_track"])
+        if self.fullscreen_mode:
+            brake_fill_y0 = brake_y1 - (brake_y1 - brake_y0) * lt
+            gas_fill_y0 = gas_y1 - (gas_y1 - gas_y0) * rt
+            self.canvas.coords(self.scene["brake_fill"], brake_x0 + 1, brake_fill_y0 + 1, brake_x1 - 1, brake_y1 - 1)
+            self.canvas.coords(self.scene["gas_fill"], gas_x0 + 1, gas_fill_y0 + 1, gas_x1 - 1, gas_y1 - 1)
+        else:
+            brake_fill_x1 = brake_x0 + (brake_x1 - brake_x0) * lt
+            gas_fill_x1 = gas_x0 + (gas_x1 - gas_x0) * rt
+            self.canvas.coords(self.scene["brake_fill"], brake_x0 + 1, brake_y0 + 1, brake_fill_x1 - 1 if brake_fill_x1 > brake_x0 + 2 else brake_x0 + 1, brake_y1 - 1)
+            self.canvas.coords(self.scene["gas_fill"], gas_x0 + 1, gas_y0 + 1, gas_fill_x1 - 1 if gas_fill_x1 > gas_x0 + 2 else gas_x0 + 1, gas_y1 - 1)
+        self.canvas.itemconfig(self.scene["gas_box"], fill="#37d45c" if gas else "#2a2a2a")
+        self.canvas.itemconfig(self.scene["brake_box"], fill="#ff6b6b" if brake else "#2a2a2a")
 
-        brake_fill_x1 = brake_x0 + (brake_x1 - brake_x0) * lt
-        gas_fill_x1 = gas_x0 + (gas_x1 - gas_x0) * rt
+    def apply_view_mode(self, fullscreen_enabled: bool, pedal_layout: int) -> None:
+        changed = (self.fullscreen_mode != fullscreen_enabled) or (self.pedal_layout != pedal_layout)
+        self.fullscreen_mode = fullscreen_enabled
+        self.pedal_layout = pedal_layout % 3
+        if not changed and self.scene:
+            return
+        if self.fullscreen_mode:
+            self.root.attributes("-alpha", 1.0)
+            self.root.configure(bg=self.fullscreen_bg_key)
+            transparent_ok = set_window_colorkey(self.root.winfo_id(), self.fullscreen_bg_key)
+            self.frame.configure(bg=self.fullscreen_bg_key, bd=0)
+            self.header.configure(bg=self.fullscreen_bg_key)
+            self.status_label.configure(bg=self.fullscreen_bg_key)
+            self.mode_label.configure(bg=self.fullscreen_bg_key)
+            self.error_label.configure(bg=self.fullscreen_bg_key)
+            self.debug_label.configure(bg=self.fullscreen_bg_key)
+            self.canvas.configure(bg=self.fullscreen_bg_key)
+            self.lock_button.pack_forget()
+            self.header.pack_forget()
+            self.mode_label.pack_forget()
+            self.error_label.pack_forget()
+            self.debug_label.pack_forget()
+            self.canvas.pack_forget()
+            self.canvas.pack(fill="both", expand=True, padx=0, pady=0)
+            if transparent_ok:
+                self.position_fullscreen_overlay()
+                set_window_clickthrough(self.root.winfo_id(), True)
+            else:
+                # Fail-safe: never keep a non-transparent full-screen overlay.
+                self.fullscreen_mode = False
+                self.root.attributes("-alpha", 0.92)
+                self.frame.configure(bg="#1f1f1f", bd=1, relief="solid")
+                self.header.configure(bg="#1f1f1f")
+                self.status_label.configure(bg="#1f1f1f")
+                self.mode_label.configure(bg="#1f1f1f")
+                self.error_label.configure(bg="#1f1f1f")
+                self.debug_label.configure(bg="#1f1f1f")
+                self.canvas.configure(bg="#171717")
+                if not self.lock_button.winfo_manager():
+                    self.lock_button.pack(**self.lock_button_pack_kwargs)
+                if not self.header.winfo_manager():
+                    self.header.pack(fill="x")
+                if not self.mode_label.winfo_manager():
+                    self.mode_label.pack(fill="x")
+                if not self.error_label.winfo_manager():
+                    self.error_label.pack(fill="x")
+                if not self.debug_label.winfo_manager():
+                    self.debug_label.pack(fill="x")
+                self.canvas.pack_forget()
+                self.canvas.pack(fill="both", expand=True)
+                set_window_clickthrough(self.root.winfo_id(), False)
+                self.position_bottom_right()
+        else:
+            self.root.attributes("-alpha", 0.92)
+            try:
+                self.root.attributes("-transparentcolor", "")
+            except Exception:
+                pass
+            self.frame.configure(bg="#1f1f1f", bd=1, relief="solid")
+            self.header.configure(bg="#1f1f1f")
+            self.status_label.configure(bg="#1f1f1f")
+            self.mode_label.configure(bg="#1f1f1f")
+            self.error_label.configure(bg="#1f1f1f")
+            self.debug_label.configure(bg="#1f1f1f")
+            self.canvas.configure(bg="#171717")
+            if not self.header.winfo_manager():
+                self.header.pack(fill="x")
+            if not self.lock_button.winfo_manager():
+                self.lock_button.pack(**self.lock_button_pack_kwargs)
+            if not self.mode_label.winfo_manager():
+                self.mode_label.pack(fill="x")
+            self.canvas.pack_forget()
+            self.canvas.pack(fill="both", expand=True)
+            if not self.error_label.winfo_manager():
+                self.error_label.pack(fill="x")
+            if not self.debug_label.winfo_manager():
+                self.debug_label.pack(fill="x")
+            set_window_clickthrough(self.root.winfo_id(), False)
+            self.position_bottom_right()
+        self._init_scene()
 
-        self.canvas.coords(self.brake_fill, brake_x0 + 1, brake_y0 + 1, brake_fill_x1 - 1 if brake_fill_x1 > brake_x0 + 2 else brake_x0 + 1, brake_y1 - 1)
-        self.canvas.coords(self.gas_fill, gas_x0 + 1, gas_y0 + 1, gas_fill_x1 - 1 if gas_fill_x1 > gas_x0 + 2 else gas_x0 + 1, gas_y1 - 1)
-
-        self.canvas.itemconfig(self.gas_box, fill="#37d45c" if gas else "#2a2a2a")
-        self.canvas.itemconfig(self.brake_box, fill="#ff6b6b" if brake else "#2a2a2a")
-
-    def update(self, state: MapperState, mode: int) -> None:
+    def update(
+        self,
+        state: MapperState,
+        mode: int,
+        fullscreen_enabled: bool,
+        pedal_layout: int,
+        fullscreen_rect: tuple[int, int, int, int] | None,
+    ) -> None:
+        self.set_fullscreen_rect(fullscreen_rect)
+        self.apply_view_mode(fullscreen_enabled, pedal_layout)
         mode_names = {
             1: "方向+线性油刹",
             2: "方向+按键油刹",
@@ -422,21 +611,31 @@ class Indicator:
             self.debug_label.config(text=state.debug_text)
         else:
             self.debug_label.config(text="")
-        self.root.update_idletasks()
-        needed_h = self.frame.winfo_reqheight()
-        cur_w = self.root.winfo_width()
-        cur_h = self.root.winfo_height()
-        target_h = max(self.win_height, needed_h)
-        if target_h != cur_h:
-            self.root.geometry(f"{cur_w}x{target_h}+{self.root.winfo_x()}+{self.root.winfo_y()}")
-            self.ensure_on_screen()
-
-    def loop(self, state_getter, mode_getter, stop_event: threading.Event) -> None:
+        if self.fullscreen_mode:
+            self.canvas.itemconfig(self.scene["status_text"], text=("状态: ON" if state.enabled else "状态: OFF"), fill=("#7dff9b" if state.enabled else "#ff6b6b"))
+            self.canvas.itemconfig(self.scene["mode_text"], text=f"模式{mode}: {mode_names.get(mode, '未知')}")
+            self.canvas.itemconfig(self.scene["error_text"], text=state.last_error)
+            self.canvas.itemconfig(self.scene["debug_text"], text=(state.debug_text if self.debug_mode else ""))
+    def loop(
+        self,
+        state_getter,
+        mode_getter,
+        fullscreen_getter,
+        pedal_layout_getter,
+        fullscreen_rect_getter,
+        stop_event: threading.Event,
+    ) -> None:
         def tick() -> None:
             if stop_event.is_set():
                 self.root.destroy()
                 return
-            self.update(state_getter(), mode_getter())
+            self.update(
+                state_getter(),
+                mode_getter(),
+                fullscreen_getter(),
+                pedal_layout_getter(),
+                fullscreen_rect_getter(),
+            )
             self.root.after(self.hud_interval_ms, tick)
 
         tick()
@@ -451,6 +650,7 @@ class MouseToVirtualGamepad:
         self.lock = threading.Lock()
 
         self.pressed_keys: set[str] = set()
+        self.handled_combos: set[str] = set()
         self.reference_pos: tuple[int, int] | None = None
         self.current_pos: tuple[int, int] | None = None
 
@@ -462,6 +662,8 @@ class MouseToVirtualGamepad:
         self.mouse_controller = mouse.Controller()
         self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
         self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
+        self.toggle_fullscreen_combo = parse_hotkey_combo(self.config.toggle_fullscreen_hotkey)
+        self.cycle_fullscreen_layout_combo = parse_hotkey_combo(self.config.cycle_fullscreen_layout_hotkey)
         self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
         self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
@@ -472,6 +674,9 @@ class MouseToVirtualGamepad:
         self.raw_last_pos = None
         self.axis_x = 0.0
         self.axis_y = 0.0
+        self.hud_fullscreen_enabled = False
+        self.hud_pedal_layout = 0
+        self.hud_fullscreen_rect: tuple[int, int, int, int] | None = None
 
         try:
             self.pad = vg.VX360Gamepad()
@@ -547,20 +752,50 @@ class MouseToVirtualGamepad:
             return
         self.pressed_keys.add(token)
 
-        if self.switch_mode_combo and token in self.switch_mode_combo and self.switch_mode_combo.issubset(self.pressed_keys):
+        if self._combo_just_pressed("switch_mode", self.switch_mode_combo):
             self.config.control_mode += 1
             if self.config.control_mode > 4:
                 self.config.control_mode = 1
             self.state.last_error = f"已切换到模式{self.config.control_mode}"
             return
 
-        if self.toggle_combo and token in self.toggle_combo and self.toggle_combo.issubset(self.pressed_keys):
+        if self._combo_just_pressed("toggle_mapper", self.toggle_combo):
             self._set_mapper_enabled(not self.state.enabled)
+            return
 
+        if self._combo_just_pressed("toggle_fullscreen", self.toggle_fullscreen_combo):
+            self.hud_fullscreen_enabled = not self.hud_fullscreen_enabled
+            if self.hud_fullscreen_enabled:
+                mx, my = self.mouse_controller.position
+                rect = get_monitor_rect_from_point(int(mx), int(my))
+                self.hud_fullscreen_rect = rect if rect[2] > 0 and rect[3] > 0 else None
+            else:
+                self.hud_fullscreen_rect = None
+            self.state.last_error = "HUD全屏已开启 (Alt+F退出)" if self.hud_fullscreen_enabled else "HUD小窗模式"
+            return
+
+        if self.hud_fullscreen_enabled and self._combo_just_pressed("cycle_fullscreen_layout", self.cycle_fullscreen_layout_combo):
+            self.hud_pedal_layout = (self.hud_pedal_layout + 1) % 3
+            layout_name = {0: "左刹车/右油门", 1: "左侧并排", 2: "右侧并排"}
+            self.state.last_error = f"全屏踏板布局: {layout_name.get(self.hud_pedal_layout, '默认')}"
+            
     def on_key_release(self, key) -> None:
         token = normalize_key_token(key)
         if token is not None:
             self.pressed_keys.discard(token)
+            if token in {"alt", "shift", "ctrl"}:
+                self.handled_combos.clear()
+
+    def _combo_just_pressed(self, combo_id: str, combo_tokens: set[str]) -> bool:
+        if not combo_tokens:
+            return False
+        if not combo_tokens.issubset(self.pressed_keys):
+            self.handled_combos.discard(combo_id)
+            return False
+        if combo_id in self.handled_combos:
+            return False
+        self.handled_combos.add(combo_id)
+        return True
 
     def on_mouse_move(self, x: int, y: int) -> None:
         do_warp = False
@@ -721,7 +956,14 @@ class MouseToVirtualGamepad:
         worker.start()
 
         try:
-            indicator.loop(lambda: self.state, lambda: self.config.control_mode, self.stop_event)
+            indicator.loop(
+                lambda: self.state,
+                lambda: self.config.control_mode,
+                lambda: self.hud_fullscreen_enabled,
+                lambda: self.hud_pedal_layout,
+                lambda: self.hud_fullscreen_rect,
+                self.stop_event,
+            )
         finally:
             self.stop_event.set()
             worker.join(timeout=1.0)
@@ -730,5 +972,8 @@ class MouseToVirtualGamepad:
 if __name__ == "__main__":
     app = MouseToVirtualGamepad()
     app.run()
+
+
+
 
 
