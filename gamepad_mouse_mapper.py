@@ -207,8 +207,8 @@ class Indicator:
         self.mode_label = tk.Label(frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", 9), anchor="w", padx=10, pady=2)
         self.mode_label.pack(fill="x")
 
-        self.canvas = tk.Canvas(frame, width=360, height=140, bg="#171717", highlightthickness=0)
-        self.canvas.pack(fill="x", padx=10, pady=6)
+        self.canvas = tk.Canvas(frame, width=360, height=98, bg="#171717", highlightthickness=0)
+        self.canvas.pack(fill="x", padx=10, pady=4)
 
         self.error_label = tk.Label(frame, text="", fg="#ffcc66", bg="#1f1f1f", font=("Segoe UI", 8), anchor="w", padx=10, pady=2)
         self.error_label.pack(fill="x")
@@ -223,7 +223,7 @@ class Indicator:
 
     def position_bottom_right(self) -> None:
         self.root.update_idletasks()
-        w, h = 390, (255 if self.debug_mode else 230)
+        w, h = 390, (205 if self.debug_mode else 180)
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{sw - w - 18}+{sh - h - 58}")
@@ -288,22 +288,21 @@ class Indicator:
     def _init_scene(self) -> None:
         c = self.canvas
         # LX horizontal slider
-        c.create_text(24, 20, text="L", fill="#cfd8dc", font=("Segoe UI", 9, "bold"))
-        self.lx_track = c.create_rectangle(40, 12, 340, 28, outline="#4a4a4a", fill="#262626")
-        self.lx_center = c.create_line(190, 10, 190, 30, fill="#9e9e9e", width=2)
-        self.lx_fill = c.create_rectangle(190, 13, 190, 27, outline="", fill="#67b7ff")
+        c.create_text(24, 17, text="L", fill="#cfd8dc", font=("Segoe UI", 9, "bold"))
+        self.lx_track = c.create_rectangle(40, 10, 340, 24, outline="#4a4a4a", fill="#262626")
+        self.lx_center = c.create_line(190, 8, 190, 26, fill="#9e9e9e", width=2)
+        self.lx_fill = c.create_rectangle(190, 11, 190, 23, outline="", fill="#67b7ff")
 
-        # RY (kept as centered indicator; pedals are RT/LT now)
-        c.create_text(24, 72, text="R", fill="#cfd8dc", font=("Segoe UI", 9, "bold"))
-        self.ry_track = c.create_rectangle(170, 40, 210, 120, outline="#4a4a4a", fill="#262626")
-        self.ry_center = c.create_line(168, 80, 212, 80, fill="#9e9e9e", width=2)
-        self.ry_fill = c.create_rectangle(173, 80, 207, 80, outline="", fill="#81f29a")
+        # LT/RT value sliders + active indicators
+        c.create_text(34, 68, text="刹车", fill="#ffcdd2", font=("Segoe UI", 9))
+        self.brake_track = c.create_rectangle(60, 60, 150, 74, outline="#8a8a8a", fill="#2a2a2a")
+        self.brake_fill = c.create_rectangle(61, 61, 61, 73, outline="", fill="#ff6b6b")
+        self.brake_box = c.create_rectangle(154, 60, 166, 74, outline="#8a8a8a", fill="#2a2a2a")
 
-        # Gas / Brake indicators (mode2 focus)
-        c.create_text(58, 130, text="刹车", fill="#ffcdd2", font=("Segoe UI", 9))
-        self.brake_box = c.create_rectangle(80, 122, 150, 136, outline="#8a8a8a", fill="#2a2a2a")
-        c.create_text(248, 130, text="油门", fill="#c8e6c9", font=("Segoe UI", 9))
-        self.gas_box = c.create_rectangle(270, 122, 340, 136, outline="#8a8a8a", fill="#2a2a2a")
+        c.create_text(222, 68, text="油门", fill="#c8e6c9", font=("Segoe UI", 9))
+        self.gas_track = c.create_rectangle(248, 60, 338, 74, outline="#8a8a8a", fill="#2a2a2a")
+        self.gas_fill = c.create_rectangle(249, 61, 249, 73, outline="", fill="#37d45c")
+        self.gas_box = c.create_rectangle(342, 60, 354, 74, outline="#8a8a8a", fill="#2a2a2a")
 
     def _draw_lx(self, lx: float) -> None:
         # Display scale for steering:
@@ -321,15 +320,21 @@ class Indicator:
         cx = 190
         left = cx + int(150 * min(0.0, view))
         right = cx + int(150 * max(0.0, view))
-        self.canvas.coords(self.lx_fill, left, 13, right, 27)
+        self.canvas.coords(self.lx_fill, left, 11, right, 23)
 
-    def _draw_ry(self, ry: float) -> None:
-        cy = 80
-        top = cy + int(38 * min(0.0, ry))
-        bottom = cy + int(38 * max(0.0, ry))
-        self.canvas.coords(self.ry_fill, 173, top, 207, bottom)
+    def _draw_pedals(self, gas: bool, brake: bool, rt: float, lt: float) -> None:
+        lt = clamp(lt, 0.0, 1.0)
+        rt = clamp(rt, 0.0, 1.0)
 
-    def _draw_pedals(self, gas: bool, brake: bool) -> None:
+        brake_x0, brake_y0, brake_x1, brake_y1 = self.canvas.coords(self.brake_track)
+        gas_x0, gas_y0, gas_x1, gas_y1 = self.canvas.coords(self.gas_track)
+
+        brake_fill_x1 = brake_x0 + (brake_x1 - brake_x0) * lt
+        gas_fill_x1 = gas_x0 + (gas_x1 - gas_x0) * rt
+
+        self.canvas.coords(self.brake_fill, brake_x0 + 1, brake_y0 + 1, brake_fill_x1 - 1 if brake_fill_x1 > brake_x0 + 2 else brake_x0 + 1, brake_y1 - 1)
+        self.canvas.coords(self.gas_fill, gas_x0 + 1, gas_y0 + 1, gas_fill_x1 - 1 if gas_fill_x1 > gas_x0 + 2 else gas_x0 + 1, gas_y1 - 1)
+
         self.canvas.itemconfig(self.gas_box, fill="#37d45c" if gas else "#2a2a2a")
         self.canvas.itemconfig(self.brake_box, fill="#ff6b6b" if brake else "#2a2a2a")
 
@@ -343,8 +348,7 @@ class Indicator:
         self.status_label.config(text="状态: ON" if state.enabled else "状态: OFF", fg="#7dff9b" if state.enabled else "#ff6b6b")
         self.mode_label.config(text=f"模式{mode}: {mode_names.get(mode, '未知')}  (Shift+V开关 / Alt+Shift+V切模式 / F10重置参考点)")
         self._draw_lx(state.left_x)
-        self._draw_ry(state.right_y)
-        self._draw_pedals(state.gas_active, state.brake_active)
+        self._draw_pedals(state.gas_active, state.brake_active, state.rt, state.lt)
         self.error_label.config(text=state.last_error)
         if self.debug_mode:
             self.debug_label.config(text=state.debug_text)
