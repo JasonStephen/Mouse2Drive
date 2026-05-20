@@ -11,7 +11,6 @@
 ## ⌨️ 热键绑定（config.cfg）
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `reset_hotkey` | `f10` | 复位（参考点回中） |
 | `toggle_hotkey` | `shift+v` | 开关映射 |
 | `switch_mode_hotkey` | `alt+shift+v` | 模式切换（1→2→3→4） |
 
@@ -49,4 +48,5 @@
 |---|---|---|
 | elative_mouse_mode | 	rue | 启用后光标回中并按相对位移累计，不受屏幕边界影响 |
 | hide_cursor_on_enable | 	rue | 映射开启时隐藏光标，关闭时恢复 |
+
 

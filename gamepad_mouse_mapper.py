@@ -11,7 +11,6 @@ from pynput import keyboard, mouse
 
 
 CONFIG_PATH = Path(__file__).with_name("config.cfg")
-RESET_HOTKEY = keyboard.Key.f10
 POLL_INTERVAL = 0.01
 
 
@@ -24,14 +23,12 @@ class AppConfig:
     debug_mode: bool = False
     hud_fps: int = 25
     gear_pulse_ms: int = 45
-    reset_hotkey: str = "f10"
     toggle_hotkey: str = "shift+v"
     switch_mode_hotkey: str = "alt+shift+v"
     gas_mouse_button: str = "right"
     brake_mouse_button: str = "left"
     gear_up_button: str = "right_shoulder"
     gear_down_button: str = "left_shoulder"
-    relative_mouse_mode: bool = True
     hide_cursor_on_enable: bool = True
 
 
@@ -140,14 +137,12 @@ def load_config() -> AppConfig:
         cfg.debug_mode = parser.getboolean(section, "debug_mode", fallback=cfg.debug_mode)
         cfg.hud_fps = parser.getint(section, "hud_fps", fallback=cfg.hud_fps)
         cfg.gear_pulse_ms = parser.getint(section, "gear_pulse_ms", fallback=cfg.gear_pulse_ms)
-        cfg.reset_hotkey = parser.get(section, "reset_hotkey", fallback=cfg.reset_hotkey)
         cfg.toggle_hotkey = parser.get(section, "toggle_hotkey", fallback=cfg.toggle_hotkey)
         cfg.switch_mode_hotkey = parser.get(section, "switch_mode_hotkey", fallback=cfg.switch_mode_hotkey)
         cfg.gas_mouse_button = parser.get(section, "gas_mouse_button", fallback=cfg.gas_mouse_button)
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
-        cfg.relative_mouse_mode = parser.getboolean(section, "relative_mouse_mode", fallback=cfg.relative_mouse_mode)
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
@@ -170,14 +165,12 @@ def save_default_config(cfg: AppConfig) -> None:
         "debug_mode": str(cfg.debug_mode).lower(),
         "hud_fps": str(cfg.hud_fps),
         "gear_pulse_ms": str(cfg.gear_pulse_ms),
-        "reset_hotkey": cfg.reset_hotkey,
         "toggle_hotkey": cfg.toggle_hotkey,
         "switch_mode_hotkey": cfg.switch_mode_hotkey,
         "gas_mouse_button": cfg.gas_mouse_button,
         "brake_mouse_button": cfg.brake_mouse_button,
         "gear_up_button": cfg.gear_up_button,
         "gear_down_button": cfg.gear_down_button,
-        "relative_mouse_mode": str(cfg.relative_mouse_mode).lower(),
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
@@ -368,7 +361,7 @@ class Indicator:
             4: "仅按键油刹",
         }
         self.status_label.config(text="状态: ON" if state.enabled else "状态: OFF", fg="#7dff9b" if state.enabled else "#ff6b6b")
-        self.mode_label.config(text=f"模式{mode}: {mode_names.get(mode, '未知')}  (Shift+V开关 / Alt+Shift+V切模式 / F10重置参考点)")
+        self.mode_label.config(text=f"模式{mode}: {mode_names.get(mode, '未知')}  (Shift+V开关 / Alt+Shift+V切模式)")
         self._draw_lx(state.left_x)
         self._draw_pedals(state.gas_active, state.brake_active, state.rt, state.lt)
         self.error_label.config(text=state.last_error)
@@ -406,7 +399,6 @@ class MouseToVirtualGamepad:
         self.gear_down_until = 0.0
 
         self.mouse_controller = mouse.Controller()
-        self.reset_combo = parse_hotkey_combo(self.config.reset_hotkey)
         self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
         self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
         self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
@@ -464,9 +456,8 @@ class MouseToVirtualGamepad:
             if self.config.hide_cursor_on_enable and not self.cursor_hidden:
                 set_cursor_visible(False)
                 self.cursor_hidden = True
-            if self.config.relative_mouse_mode:
-                self.relative_center = self._virtual_screen_center()
-                self._warp_to_center()
+            self.relative_center = self._virtual_screen_center()
+            self._warp_to_center()
             self.state.last_error = "已开启"
         else:
             if self.cursor_hidden:
@@ -495,11 +486,6 @@ class MouseToVirtualGamepad:
             return
         self.pressed_keys.add(token)
 
-        if self.reset_combo and self.reset_combo.issubset(self.pressed_keys):
-            self.reset_all()
-            self.state.last_error = "已复位"
-            return
-
         if self.switch_mode_combo and token in self.switch_mode_combo and self.switch_mode_combo.issubset(self.pressed_keys):
             self.config.control_mode += 1
             if self.config.control_mode > 4:
@@ -518,7 +504,7 @@ class MouseToVirtualGamepad:
     def on_mouse_move(self, x: int, y: int) -> None:
         do_warp = False
         with self.lock:
-            if self.state.enabled and self.config.relative_mouse_mode:
+            if self.state.enabled:
                 if self.ignore_move_events > 0:
                     self.ignore_move_events -= 1
                     self.raw_last_pos = (x, y)
@@ -565,10 +551,7 @@ class MouseToVirtualGamepad:
         # mode1/mode2: steering enabled by mouse X
         # mode3/mode4: pedal-only, no steering
         if self.config.control_mode in (1, 2):
-            if self.config.relative_mouse_mode:
-                base_lx = self.axis_x
-            else:
-                base_lx = clamp(dx / self.config.reference_range_x_px, -1.0, 1.0)
+            base_lx = self.axis_x
             abs_base_lx = abs(base_lx)
             if abs_base_lx > 0.0:
                 abs_lx = self.config.min_output_x + (1.0 - self.config.min_output_x) * abs_base_lx
@@ -582,10 +565,7 @@ class MouseToVirtualGamepad:
         # mode1/mode3: linear RT/LT by mouse Y
         # mode2/mode4: digital RT/LT by mouse buttons
         if self.config.control_mode in (1, 3):
-            if self.config.relative_mouse_mode:
-                pedal = self.axis_y
-            else:
-                pedal = clamp(dy / self.config.reference_range_y_px, -1.0, 1.0)
+            pedal = self.axis_y
             if pedal < 0.0:
                 self.state.rt = abs(pedal)
                 self.state.lt = 0.0
