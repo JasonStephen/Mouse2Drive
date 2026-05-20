@@ -758,16 +758,11 @@ class MouseToVirtualGamepad:
             self.state.right_y = 0.0
 
     def _virtual_screen_center(self) -> tuple[int, int]:
-        try:
-            user32 = ctypes.windll.user32
-            vx = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
-            vy = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
-            vw = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
-            vh = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
-            return (int(vx + vw // 2), int(vy + vh // 2))
-        except Exception:
-            x, y = self.mouse_controller.position
-            return (int(x), int(y))
+        x, y = self.mouse_controller.position
+        left, top, width, height = get_monitor_rect_from_point(int(x), int(y))
+        if width > 0 and height > 0:
+            return (int(left + width // 2), int(top + height // 2))
+        return (int(x), int(y))
 
     def _warp_to_center(self) -> None:
         if self.relative_center is None:
