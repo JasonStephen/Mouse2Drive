@@ -30,6 +30,7 @@ class AppConfig:
     gear_up_button: str = "right_shoulder"
     gear_down_button: str = "left_shoulder"
     hide_cursor_on_enable: bool = True
+    windows_scale: float = 1.0
 
 
 @dataclass
@@ -144,6 +145,7 @@ def load_config() -> AppConfig:
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
+        cfg.windows_scale = parser.getfloat(section, "windows_scale", fallback=cfg.windows_scale)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
@@ -152,6 +154,7 @@ def load_config() -> AppConfig:
     cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 0.95)
     cfg.hud_fps = int(clamp(cfg.hud_fps, 5, 240))
     cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
+    cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 2.0)
     return cfg
 
 
@@ -172,17 +175,35 @@ def save_default_config(cfg: AppConfig) -> None:
         "gear_up_button": cfg.gear_up_button,
         "gear_down_button": cfg.gear_down_button,
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
+        "windows_scale": f"{cfg.windows_scale:.2f}",
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
 
 
 class Indicator:
-    def __init__(self, debug_mode: bool = False, hud_fps: int = 25, min_output_x: float = 0.23) -> None:
+    def __init__(
+        self,
+        debug_mode: bool = False,
+        hud_fps: int = 25,
+        min_output_x: float = 0.23,
+        windows_scale: float = 1.0,
+    ) -> None:
         self.debug_mode = debug_mode
         self.hud_fps = int(clamp(hud_fps, 5, 240))
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
         self.min_output_x = clamp(min_output_x, 0.0, 0.95)
+        # Keep text larger even at 100% scale to improve readability.
+        self.ui_scale = max(1.15, windows_scale * 1.15)
+        self.base_width = 390
+        self.base_height_normal = 180
+        self.base_height_debug = 205
+        self.win_width = int(round(self.base_width * self.ui_scale))
+        self.win_height = int(round((self.base_height_debug if self.debug_mode else self.base_height_normal) * self.ui_scale))
+        self.canvas_width = max(360, int(round(360 * self.ui_scale)))
+        self.canvas_height = max(98, int(round(98 * self.ui_scale)))
+        self.pad_x = max(8, int(round(10 * self.ui_scale)))
+        self.pad_y = max(3, int(round(4 * self.ui_scale)))
         self.locked = True
         self.drag_start_mouse_x = 0
         self.drag_start_mouse_y = 0
@@ -201,7 +222,7 @@ class Indicator:
         self.header = tk.Frame(frame, bg="#1f1f1f")
         self.header.pack(fill="x")
 
-        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", 10, "bold"), anchor="w", padx=10, pady=4)
+        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(10), "bold"), anchor="w", padx=self.pad_x, pady=self.pad_y)
         self.status_label.pack(side="left", fill="x", expand=True)
 
         self.lock_button = tk.Button(
@@ -213,21 +234,32 @@ class Indicator:
             activebackground="#3a3a3a",
             activeforeground="#ffffff",
             bd=0,
-            padx=8,
-            pady=2,
-            font=("Segoe UI", 8, "bold"),
+            padx=max(6, int(round(8 * self.ui_scale))),
+            pady=max(1, int(round(2 * self.ui_scale))),
+            font=("Segoe UI", self._font(8), "bold"),
         )
-        self.lock_button.pack(side="right", padx=8, pady=4)
+        self.lock_button.pack(side="right", padx=self.pad_x, pady=self.pad_y)
 
-        self.mode_label = tk.Label(frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", 9), anchor="w", padx=10, pady=2)
+        self.mode_label = tk.Label(
+            frame,
+            text="模式: 1",
+            fg="#b7d8ff",
+            bg="#1f1f1f",
+            font=("Segoe UI", self._font(9)),
+            anchor="w",
+            justify="left",
+            wraplength=max(200, self.win_width - self.pad_x * 2),
+            padx=self.pad_x,
+            pady=max(1, int(round(2 * self.ui_scale))),
+        )
         self.mode_label.pack(fill="x")
 
-        self.canvas = tk.Canvas(frame, width=360, height=98, bg="#171717", highlightthickness=0)
-        self.canvas.pack(fill="x", padx=10, pady=4)
+        self.canvas = tk.Canvas(frame, width=self.canvas_width, height=self.canvas_height, bg="#171717", highlightthickness=0)
+        self.canvas.pack(fill="x", padx=self.pad_x, pady=self.pad_y)
 
-        self.error_label = tk.Label(frame, text="", fg="#ffcc66", bg="#1f1f1f", font=("Segoe UI", 8), anchor="w", padx=10, pady=2)
+        self.error_label = tk.Label(frame, text="", fg="#ffcc66", bg="#1f1f1f", font=("Segoe UI", self._font(8)), anchor="w", justify="left", wraplength=max(200, self.win_width - self.pad_x * 2), padx=self.pad_x, pady=max(1, int(round(2 * self.ui_scale))))
         self.error_label.pack(fill="x")
-        self.debug_label = tk.Label(frame, text="", fg="#9fd6ff", bg="#1f1f1f", font=("Consolas", 8), anchor="w", padx=10, pady=2)
+        self.debug_label = tk.Label(frame, text="", fg="#9fd6ff", bg="#1f1f1f", font=("Consolas", self._font(8)), anchor="w", justify="left", wraplength=max(200, self.win_width - self.pad_x * 2), padx=self.pad_x, pady=max(1, int(round(2 * self.ui_scale))))
         self.debug_label.pack(fill="x")
 
         self.root.update_idletasks()
@@ -238,7 +270,7 @@ class Indicator:
 
     def position_bottom_right(self) -> None:
         self.root.update_idletasks()
-        w, h = 390, (205 if self.debug_mode else 180)
+        w, h = self.win_width, self.win_height
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{sw - w - 18}+{sh - h - 58}")
@@ -302,22 +334,41 @@ class Indicator:
 
     def _init_scene(self) -> None:
         c = self.canvas
+        s = self.ui_scale
+        x = lambda v: int(round(v * s))
+        y = lambda v: int(round(v * s))
+
+        lx_text_x = x(24)
+        lx_text_y = y(17)
+        lx_x0, lx_y0, lx_x1, lx_y1 = x(40), y(10), x(340), y(24)
+        lx_center_x = x(190)
+        lx_fill_y0, lx_fill_y1 = y(11), y(23)
+        brake_label_x, brake_label_y = x(34), y(68)
+        brake_x0, brake_y0, brake_x1, brake_y1 = x(60), y(60), x(150), y(74)
+        brake_box_x0, brake_box_x1 = x(154), x(166)
+        gas_label_x, gas_label_y = x(222), y(68)
+        gas_x0, gas_y0, gas_x1, gas_y1 = x(248), y(60), x(338), y(74)
+        gas_box_x0, gas_box_x1 = x(342), x(354)
+
         # LX horizontal slider
-        c.create_text(24, 17, text="L", fill="#cfd8dc", font=("Segoe UI", 9, "bold"))
-        self.lx_track = c.create_rectangle(40, 10, 340, 24, outline="#4a4a4a", fill="#262626")
-        self.lx_center = c.create_line(190, 8, 190, 26, fill="#9e9e9e", width=2)
-        self.lx_fill = c.create_rectangle(190, 11, 190, 23, outline="", fill="#67b7ff")
+        c.create_text(lx_text_x, lx_text_y, text="L", fill="#cfd8dc", font=("Segoe UI", self._font(9), "bold"))
+        self.lx_track = c.create_rectangle(lx_x0, lx_y0, lx_x1, lx_y1, outline="#4a4a4a", fill="#262626")
+        self.lx_center = c.create_line(lx_center_x, y(8), lx_center_x, y(26), fill="#9e9e9e", width=max(1, int(round(2 * s))))
+        self.lx_fill = c.create_rectangle(lx_center_x, lx_fill_y0, lx_center_x, lx_fill_y1, outline="", fill="#67b7ff")
 
         # LT/RT value sliders + active indicators
-        c.create_text(34, 68, text="刹车", fill="#ffcdd2", font=("Segoe UI", 9))
-        self.brake_track = c.create_rectangle(60, 60, 150, 74, outline="#8a8a8a", fill="#2a2a2a")
-        self.brake_fill = c.create_rectangle(61, 61, 61, 73, outline="", fill="#ff6b6b")
-        self.brake_box = c.create_rectangle(154, 60, 166, 74, outline="#8a8a8a", fill="#2a2a2a")
+        c.create_text(brake_label_x, brake_label_y, text="刹车", fill="#ffcdd2", font=("Segoe UI", self._font(9)))
+        self.brake_track = c.create_rectangle(brake_x0, brake_y0, brake_x1, brake_y1, outline="#8a8a8a", fill="#2a2a2a")
+        self.brake_fill = c.create_rectangle(brake_x0 + 1, brake_y0 + 1, brake_x0 + 1, brake_y1 - 1, outline="", fill="#ff6b6b")
+        self.brake_box = c.create_rectangle(brake_box_x0, brake_y0, brake_box_x1, brake_y1, outline="#8a8a8a", fill="#2a2a2a")
 
-        c.create_text(222, 68, text="油门", fill="#c8e6c9", font=("Segoe UI", 9))
-        self.gas_track = c.create_rectangle(248, 60, 338, 74, outline="#8a8a8a", fill="#2a2a2a")
-        self.gas_fill = c.create_rectangle(249, 61, 249, 73, outline="", fill="#37d45c")
-        self.gas_box = c.create_rectangle(342, 60, 354, 74, outline="#8a8a8a", fill="#2a2a2a")
+        c.create_text(gas_label_x, gas_label_y, text="油门", fill="#c8e6c9", font=("Segoe UI", self._font(9)))
+        self.gas_track = c.create_rectangle(gas_x0, gas_y0, gas_x1, gas_y1, outline="#8a8a8a", fill="#2a2a2a")
+        self.gas_fill = c.create_rectangle(gas_x0 + 1, gas_y0 + 1, gas_x0 + 1, gas_y1 - 1, outline="", fill="#37d45c")
+        self.gas_box = c.create_rectangle(gas_box_x0, gas_y0, gas_box_x1, gas_y1, outline="#8a8a8a", fill="#2a2a2a")
+
+    def _font(self, base_size: int) -> int:
+        return max(8, int(round(base_size * self.ui_scale)))
 
     def _draw_lx(self, lx: float) -> None:
         # Display scale for steering:
@@ -332,10 +383,12 @@ class Indicator:
             den = max(1e-6, 1.0 - self.min_output_x)
             view = clamp((ax - self.min_output_x) / den, 0.0, 1.0)
             view = view if lx >= 0 else -view
-        cx = 190
-        left = cx + int(150 * min(0.0, view))
-        right = cx + int(150 * max(0.0, view))
-        self.canvas.coords(self.lx_fill, left, 11, right, 23)
+        x0, y0, x1, y1 = self.canvas.coords(self.lx_track)
+        cx = (x0 + x1) / 2.0
+        half = (x1 - x0) / 2.0
+        left = cx + (half * min(0.0, view))
+        right = cx + (half * max(0.0, view))
+        self.canvas.coords(self.lx_fill, left, y0 + 1, right, y1 - 1)
 
     def _draw_pedals(self, gas: bool, brake: bool, rt: float, lt: float) -> None:
         lt = clamp(lt, 0.0, 1.0)
@@ -369,6 +422,14 @@ class Indicator:
             self.debug_label.config(text=state.debug_text)
         else:
             self.debug_label.config(text="")
+        self.root.update_idletasks()
+        needed_h = self.frame.winfo_reqheight()
+        cur_w = self.root.winfo_width()
+        cur_h = self.root.winfo_height()
+        target_h = max(self.win_height, needed_h)
+        if target_h != cur_h:
+            self.root.geometry(f"{cur_w}x{target_h}+{self.root.winfo_x()}+{self.root.winfo_y()}")
+            self.ensure_on_screen()
 
     def loop(self, state_getter, mode_getter, stop_event: threading.Event) -> None:
         def tick() -> None:
@@ -652,6 +713,7 @@ class MouseToVirtualGamepad:
             debug_mode=self.config.debug_mode,
             hud_fps=self.config.hud_fps,
             min_output_x=self.config.min_output_x,
+            windows_scale=self.config.windows_scale,
         )
         indicator.root.protocol("WM_DELETE_WINDOW", self.stop_event.set)
 
