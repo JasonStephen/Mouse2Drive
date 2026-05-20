@@ -1,4 +1,5 @@
 ﻿import configparser
+import ctypes
 import threading
 import time
 import tkinter as tk
@@ -21,6 +22,7 @@ class AppConfig:
     reference_range_y_px: float = 260.0
     min_output_x: float = 0.23
     debug_mode: bool = False
+    hud_fps: int = 25
 
 
 @dataclass
@@ -60,12 +62,14 @@ def load_config() -> AppConfig:
         cfg.reference_range_y_px = parser.getfloat(section, "reference_range_y_px", fallback=cfg.reference_range_y_px)
         cfg.min_output_x = parser.getfloat(section, "min_output_x", fallback=cfg.min_output_x)
         cfg.debug_mode = parser.getboolean(section, "debug_mode", fallback=cfg.debug_mode)
+        cfg.hud_fps = parser.getint(section, "hud_fps", fallback=cfg.hud_fps)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
     cfg.reference_range_x_px = max(1.0, cfg.reference_range_x_px)
     cfg.reference_range_y_px = max(1.0, cfg.reference_range_y_px)
     cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 0.95)
+    cfg.hud_fps = int(clamp(cfg.hud_fps, 5, 240))
     return cfg
 
 
@@ -77,14 +81,17 @@ def save_default_config(cfg: AppConfig) -> None:
         "reference_range_y_px": str(cfg.reference_range_y_px),
         "min_output_x": str(cfg.min_output_x),
         "debug_mode": str(cfg.debug_mode).lower(),
+        "hud_fps": str(cfg.hud_fps),
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
 
 
 class Indicator:
-    def __init__(self, debug_mode: bool = False) -> None:
+    def __init__(self, debug_mode: bool = False, hud_fps: int = 25) -> None:
         self.debug_mode = debug_mode
+        self.hud_fps = int(clamp(hud_fps, 5, 240))
+        self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
         self.locked = True
         self.drag_start_mouse_x = 0
         self.drag_start_mouse_y = 0
@@ -178,15 +185,27 @@ class Indicator:
         self.root.update_idletasks()
         win_w = self.root.winfo_width()
         win_h = self.root.winfo_height()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
         x = self.root.winfo_x()
         y = self.root.winfo_y()
 
-        max_x = max(0, sw - win_w)
-        max_y = max(0, sh - win_h)
-        nx = int(clamp(x, 0, max_x))
-        ny = int(clamp(y, 0, max_y))
+        # Multi-monitor friendly: clamp inside the virtual desktop, not only primary screen.
+        try:
+            user32 = ctypes.windll.user32
+            vx = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+            vy = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+            vw = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+            vh = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+        except Exception:
+            vx, vy = 0, 0
+            vw = self.root.winfo_screenwidth()
+            vh = self.root.winfo_screenheight()
+
+        min_x = vx
+        min_y = vy
+        max_x = vx + max(0, vw - win_w)
+        max_y = vy + max(0, vh - win_h)
+        nx = int(clamp(x, min_x, max_x))
+        ny = int(clamp(y, min_y, max_y))
         if nx != x or ny != y:
             self.root.geometry(f"+{nx}+{ny}")
 
@@ -250,7 +269,7 @@ class Indicator:
                 self.root.destroy()
                 return
             self.update(state_getter(), mode_getter())
-            self.root.after(40, tick)
+            self.root.after(self.hud_interval_ms, tick)
 
         tick()
         self.root.mainloop()
@@ -427,7 +446,7 @@ class MouseToVirtualGamepad:
             self.reset_all()
 
     def run(self) -> None:
-        indicator = Indicator(debug_mode=self.config.debug_mode)
+        indicator = Indicator(debug_mode=self.config.debug_mode, hud_fps=self.config.hud_fps)
         indicator.root.protocol("WM_DELETE_WINDOW", self.stop_event.set)
 
         worker = threading.Thread(target=self.worker_loop, daemon=True)
@@ -443,3 +462,5 @@ class MouseToVirtualGamepad:
 if __name__ == "__main__":
     app = MouseToVirtualGamepad()
     app.run()
+
+
