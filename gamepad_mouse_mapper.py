@@ -35,6 +35,7 @@ class AppConfig:
     hide_cursor_on_enable: bool = True
     windows_scale: float = 1.0
     fullscreen_scale: float = 1.0
+    settings_panel_scale: float = 1.0
     fullscreen_alpha: float = 0.00
 
 
@@ -245,6 +246,7 @@ def load_config() -> AppConfig:
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
         cfg.windows_scale = parser.getfloat(section, "windows_scale", fallback=cfg.windows_scale)
         cfg.fullscreen_scale = parser.getfloat(section, "fullscreen_scale", fallback=cfg.fullscreen_scale)
+        cfg.settings_panel_scale = parser.getfloat(section, "settings_panel_scale", fallback=cfg.settings_panel_scale)
         cfg.fullscreen_alpha = parser.getfloat(section, "fullscreen_alpha", fallback=cfg.fullscreen_alpha)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
@@ -256,6 +258,7 @@ def load_config() -> AppConfig:
     cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 2.0)
     cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 2.0)
+    cfg.settings_panel_scale = clamp(cfg.settings_panel_scale, 0.8, 2.0)
     cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 0.95)
     return cfg
 
@@ -280,6 +283,7 @@ def save_default_config(cfg: AppConfig) -> None:
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
         "windows_scale": f"{cfg.windows_scale:.2f}",
         "fullscreen_scale": f"{cfg.fullscreen_scale:.2f}",
+        "settings_panel_scale": f"{cfg.settings_panel_scale:.2f}",
         "fullscreen_alpha": f"{cfg.fullscreen_alpha:.2f}",
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
@@ -294,6 +298,7 @@ class Indicator:
         min_output_x: float = 0.235,
         windows_scale: float = 1.0,
         fullscreen_scale: float = 1.0,
+        settings_panel_scale: float = 1.0,
         fullscreen_alpha: float = 0.00,
         settings_getter=None,
         settings_apply_callback=None,
@@ -304,6 +309,7 @@ class Indicator:
         self.min_output_x = clamp(min_output_x, 0.0, 1.0)
         self.window_scale = clamp(windows_scale, 0.8, 2.0)
         self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 2.0)
+        self.settings_panel_scale = clamp(settings_panel_scale, 0.8, 2.0)
         self.ui_scale = max(1.15, self.window_scale * 1.15)
         self.fullscreen_alpha = clamp(fullscreen_alpha, 0.0, 0.95)
         self.settings_getter = settings_getter
@@ -311,6 +317,7 @@ class Indicator:
         self.settings_window: tk.Toplevel | None = None
         self.settings_window_scale_var: tk.StringVar | None = None
         self.settings_fullscreen_scale_var: tk.StringVar | None = None
+        self.settings_panel_scale_var: tk.StringVar | None = None
         self.settings_min_output_var: tk.StringVar | None = None
         self.fullscreen_mode = False
         self.fullscreen_available = True
@@ -689,6 +696,7 @@ class Indicator:
         return {
             "window_scale": self.window_scale,
             "fullscreen_scale": self.fullscreen_scale,
+            "settings_panel_scale": self.settings_panel_scale,
             "min_output_x": self.min_output_x,
         }
 
@@ -700,7 +708,10 @@ class Indicator:
         baseline = self._get_live_settings()
         win = tk.Toplevel(self.root)
         win.title("设置")
-        win.geometry("420x230")
+        panel_scale = clamp(float(baseline.get("settings_panel_scale", self.settings_panel_scale)), 0.8, 2.0)
+        win_w = int(round(840 * panel_scale))
+        win_h = int(round(300 * panel_scale))
+        win.geometry(f"{win_w}x{win_h}")
         win.resizable(False, False)
         win.configure(bg="#1f1f1f")
         win.transient(self.root)
@@ -708,20 +719,132 @@ class Indicator:
         self.settings_window = win
         self.settings_window_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('window_scale', self.window_scale)), 0.8, 2.0):.2f}")
         self.settings_fullscreen_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('fullscreen_scale', self.fullscreen_scale)), 0.8, 2.0):.2f}")
+        self.settings_panel_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('settings_panel_scale', self.settings_panel_scale)), 0.8, 2.0):.2f}")
         self.settings_min_output_var = tk.StringVar(value=f"{clamp(float(baseline.get('min_output_x', self.min_output_x)), 0.0, 1.0):.3f}")
 
-        form = tk.Frame(win, bg="#1f1f1f")
-        form.pack(fill="both", expand=True, padx=16, pady=16)
-        tk.Label(form, text="小窗缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        tk.Entry(form, textvariable=self.settings_window_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff").grid(row=0, column=1, sticky="w", pady=(0, 6))
-        tk.Label(form, text="全屏缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w").grid(row=1, column=0, sticky="w", pady=(0, 6))
-        tk.Entry(form, textvariable=self.settings_fullscreen_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff").grid(row=1, column=1, sticky="w", pady=(0, 6))
-        tk.Label(form, text="非零方向起始输出 (0 - 1)", fg="#f0f0f0", bg="#1f1f1f", anchor="w").grid(row=2, column=0, sticky="w", pady=(0, 6))
-        tk.Entry(form, textvariable=self.settings_min_output_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff").grid(row=2, column=1, sticky="w", pady=(0, 6))
-        tk.Button(form, text="重置默认", command=self._reset_settings_defaults, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
+        root_panel = tk.Frame(win, bg="#1f1f1f")
+        root_panel.pack(fill="both", expand=True, padx=16, pady=16)
+        root_panel.grid_columnconfigure(1, weight=1)
+        root_panel.grid_columnconfigure(2, weight=0)
+        root_panel.grid_rowconfigure(0, weight=1)
 
-        actions = tk.Frame(form, bg="#1f1f1f")
-        actions.grid(row=3, column=0, columnspan=3, sticky="e", pady=(18, 0))
+        left_panel = tk.Frame(root_panel, bg="#1f1f1f")
+        left_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        tk.Label(left_panel, text="设置类型", fg="#cfd8dc", bg="#1f1f1f", anchor="w").pack(fill="x", pady=(0, 6))
+        category_list = tk.Listbox(
+            left_panel,
+            height=8,
+            width=12,
+            activestyle="none",
+            exportselection=False,
+            bg="#2b2b2b",
+            fg="#ffffff",
+            selectbackground="#196d2d",
+            selectforeground="#ffffff",
+            bd=0,
+            highlightthickness=0,
+        )
+        category_list.pack(fill="y")
+        category_list.insert("end", "图像显示")
+        category_list.insert("end", "灵敏度")
+
+        right_panel = tk.Frame(root_panel, bg="#1f1f1f")
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
+        right_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(0, weight=1)
+        detail_panel = tk.Frame(root_panel, bg="#1f1f1f")
+        detail_panel.grid(row=0, column=2, sticky="nsew")
+        detail_panel.configure(width=260)
+        detail_panel.pack_propagate(False)
+        tk.Label(detail_panel, text="提示详情", fg="#cfd8dc", bg="#1f1f1f", anchor="w").pack(fill="x", pady=(0, 6))
+        detail_text_var = tk.StringVar(value="")
+        detail_text_label = tk.Label(
+            detail_panel,
+            textvariable=detail_text_var,
+            fg="#f0f0f0",
+            bg="#2b2b2b",
+            anchor="nw",
+            justify="left",
+            wraplength=240,
+            padx=10,
+            pady=10,
+            bd=0,
+        )
+        detail_text_label.pack(fill="both", expand=True)
+
+        page_display = tk.Frame(right_panel, bg="#1f1f1f")
+        page_sense = tk.Frame(right_panel, bg="#1f1f1f")
+
+        category_names = {0: "图像显示", 1: "灵敏度"}
+        category_detail_map = {0: "", 1: ""}
+        current_category_idx = {"value": 0}
+
+        def _category_detail_text(idx: int) -> str:
+            category_name = category_names.get(idx, "当前分类")
+            detail = category_detail_map.get(idx, "")
+            if detail.strip():
+                return detail
+            return f"这是{category_name}的提示详情，目前为空"
+
+        def _show_category_detail() -> None:
+            detail_text_var.set(_category_detail_text(current_category_idx["value"]))
+
+        def _bind_hover_detail(widget: tk.Widget, text: str) -> None:
+            widget.bind("<Enter>", lambda _e: detail_text_var.set(text), add="+")
+            widget.bind("<Leave>", lambda _e: _show_category_detail(), add="+")
+
+        display_label_1 = tk.Label(page_display, text="小窗缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
+        display_label_1.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        display_entry_1 = tk.Entry(page_display, textvariable=self.settings_window_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
+        display_entry_1.grid(row=0, column=1, sticky="w", pady=(0, 8))
+        display_label_2 = tk.Label(page_display, text="全屏缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
+        display_label_2.grid(row=1, column=0, sticky="w", pady=(0, 8))
+        display_entry_2 = tk.Entry(page_display, textvariable=self.settings_fullscreen_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
+        display_entry_2.grid(row=1, column=1, sticky="w", pady=(0, 8))
+        display_label_3 = tk.Label(page_display, text="设置面板缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
+        display_label_3.grid(row=2, column=0, sticky="w", pady=(0, 8))
+        display_entry_3 = tk.Entry(page_display, textvariable=self.settings_panel_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
+        display_entry_3.grid(row=2, column=1, sticky="w", pady=(0, 8))
+
+        sense_label = tk.Label(page_sense, text="非零方向起始输出 (0 - 1)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
+        sense_label.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        sense_entry = tk.Entry(page_sense, textvariable=self.settings_min_output_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
+        sense_entry.grid(row=0, column=1, sticky="w", pady=(0, 8))
+        reset_btn = tk.Button(page_sense, text="重置默认", command=self._reset_settings_defaults, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0)
+        reset_btn.grid(row=0, column=2, sticky="w", padx=(8, 0), pady=(0, 8))
+
+        _bind_hover_detail(display_label_1, "调整小窗界面的整体显示比例，不影响全屏显示比例。")
+        _bind_hover_detail(display_entry_1, "输入 0.8 到 2.0 之间的数字。")
+        _bind_hover_detail(display_label_2, "调整全屏界面的整体显示比例，不影响小窗显示比例。")
+        _bind_hover_detail(display_entry_2, "输入 0.8 到 2.0 之间的数字。")
+        _bind_hover_detail(display_label_3, "调整设置面板本身的显示大小。")
+        _bind_hover_detail(display_entry_3, "输入 0.8 到 2.0 之间的数字。")
+        _bind_hover_detail(sense_label, "设置方向开始输出的最小非零值，数值越大起步越灵敏。")
+        _bind_hover_detail(sense_entry, "输入 0 到 1 之间的数字。")
+        _bind_hover_detail(reset_btn, "将非零方向起始输出恢复到默认值 0.235。")
+
+        page_display.grid(row=0, column=0, sticky="nw")
+        page_sense.grid(row=0, column=0, sticky="nw")
+        page_sense.grid_remove()
+
+        def _switch_settings_page(_event=None):
+            idxs = category_list.curselection()
+            idx = idxs[0] if idxs else 0
+            current_category_idx["value"] = idx
+            if idx == 0:
+                page_sense.grid_remove()
+                page_display.grid()
+            else:
+                page_display.grid_remove()
+                page_sense.grid()
+            _show_category_detail()
+
+        category_list.selection_set(0)
+        category_list.bind("<<ListboxSelect>>", _switch_settings_page)
+        _show_category_detail()
+
+        actions = tk.Frame(right_panel, bg="#1f1f1f")
+        actions.grid(row=1, column=0, sticky="e", pady=(18, 0))
         tk.Button(actions, text="确认并应用", command=self._confirm_settings, bg="#196d2d", fg="#ffffff", activebackground="#238a3b", activeforeground="#ffffff", bd=0, padx=12).pack(side="left", padx=(0, 8))
         tk.Button(actions, text="关闭", command=self._close_settings_with_prompt, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, padx=12).pack(side="left")
         win.protocol("WM_DELETE_WINDOW", self._close_settings_with_prompt)
@@ -734,8 +857,9 @@ class Indicator:
         try:
             window_scale = clamp(float(self.settings_window_scale_var.get()), 0.8, 2.0)
             fullscreen_scale = clamp(float(self.settings_fullscreen_scale_var.get()), 0.8, 2.0)
+            settings_panel_scale = clamp(float(self.settings_panel_scale_var.get()), 0.8, 2.0)
             min_output_x = clamp(float(self.settings_min_output_var.get()), 0.0, 1.0)
-            return {"window_scale": window_scale, "fullscreen_scale": fullscreen_scale, "min_output_x": min_output_x}
+            return {"window_scale": window_scale, "fullscreen_scale": fullscreen_scale, "settings_panel_scale": settings_panel_scale, "min_output_x": min_output_x}
         except Exception:
             messagebox.showerror("设置错误", "请输入有效数字。")
             return None
@@ -747,12 +871,14 @@ class Indicator:
         return (
             abs(parsed["window_scale"] - float(baseline.get("window_scale", self.window_scale))) > 1e-6
             or abs(parsed["fullscreen_scale"] - float(baseline.get("fullscreen_scale", self.fullscreen_scale))) > 1e-6
+            or abs(parsed["settings_panel_scale"] - float(baseline.get("settings_panel_scale", self.settings_panel_scale))) > 1e-6
             or abs(parsed["min_output_x"] - float(baseline.get("min_output_x", self.min_output_x))) > 1e-6
         )
 
     def _apply_settings_values(self, values: dict, save_to_file: bool) -> None:
         self.window_scale = clamp(float(values["window_scale"]), 0.8, 2.0)
         self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 2.0)
+        self.settings_panel_scale = clamp(float(values["settings_panel_scale"]), 0.8, 2.0)
         self.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         if callable(self.settings_apply_callback):
             self.settings_apply_callback(dict(values), save_to_file)
@@ -989,12 +1115,14 @@ class MouseToVirtualGamepad:
         return {
             "window_scale": self.config.windows_scale,
             "fullscreen_scale": self.config.fullscreen_scale,
+            "settings_panel_scale": self.config.settings_panel_scale,
             "min_output_x": self.config.min_output_x,
         }
 
     def apply_runtime_settings(self, values: dict, save_to_file: bool) -> None:
         self.config.windows_scale = clamp(float(values["window_scale"]), 0.8, 2.0)
         self.config.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 2.0)
+        self.config.settings_panel_scale = clamp(float(values["settings_panel_scale"]), 0.8, 2.0)
         self.config.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         if save_to_file:
             save_default_config(self.config)
@@ -1256,6 +1384,7 @@ class MouseToVirtualGamepad:
             min_output_x=self.config.min_output_x,
             windows_scale=self.config.windows_scale,
             fullscreen_scale=self.config.fullscreen_scale,
+            settings_panel_scale=self.config.settings_panel_scale,
             fullscreen_alpha=self.config.fullscreen_alpha,
             settings_getter=self.get_runtime_settings,
             settings_apply_callback=self.apply_runtime_settings,
