@@ -1,11 +1,13 @@
-:root {
+﻿:root {
   --bg: #1f1f1f;
   --panel: #2b2b2b;
+  --panel2: #252525;
   --text: #f0f0f0;
   --muted: #cfd8dc;
   --green: #196d2d;
   --blue: #2a5d9f;
   --gray: #3a3a3a;
+  --border: #454545;
 }
 
 * { box-sizing: border-box; }
@@ -13,14 +15,15 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 
 .layout {
   height: 100%;
+  min-width: 720px;
   padding: 10px;
   display: grid;
-  grid-template-columns: 96px 1fr 220px;
+  grid-template-columns: 96px 1fr 230px;
   gap: 10px;
 }
 
 .card { background: var(--panel); }
-.title { color: var(--muted); margin-bottom: 8px; white-space: nowrap; }
+.title { color: var(--muted); margin-bottom: 8px; white-space: nowrap; font-weight: 600; }
 
 .left { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 .tab {
@@ -34,51 +37,70 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 }
 .tab.active { background: var(--green); }
 
-.middle { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
+.middle {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+}
+
+.middle-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .page { display: flex; flex-direction: column; gap: 8px; }
-.row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
-.subttl { color: var(--muted); margin: 6px 0 4px; white-space: nowrap; }
+.row { display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.subttl { color: var(--muted); margin: 6px 0 4px; white-space: nowrap; font-weight: 600; }
 
 .lbl {
-  width: 180px;
+  width: 165px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: ew-resize;
 }
 
+.inp, .inp-hotkey, .sel {
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  outline: none;
+  height: 28px;
+  padding: 4px 8px;
+}
+
 .inp {
-  width: 72px;
+  width: 78px;
   text-align: center;
-  padding: 4px 8px;
-  border: 1px solid #454545;
-  background: var(--panel);
-  color: var(--text);
-  outline: none;
 }
-.inp-wide {
-  width: 220px;
+
+.inp-hotkey {
+  width: 185px;
   text-align: left;
-  padding: 4px 8px;
-  border: 1px solid #454545;
-  background: var(--panel);
-  color: var(--text);
-  outline: none;
 }
-.hotkey.capturing { border-color: #4da3ff; box-shadow: 0 0 0 1px #4da3ff inset; }
 
 .sel {
-  width: 220px;
-  text-align: left;
-  padding: 4px 6px;
-  border: 1px solid #454545;
-  background: var(--panel);
-  color: var(--text);
-  outline: none;
+  width: 185px;
 }
 
+.hotkey.capturing { border-color: #4da3ff; box-shadow: 0 0 0 1px #4da3ff inset; }
 
-.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.icon-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #505050;
+  background: #363636;
+  color: #eaeaea;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+.icon-btn:hover { background: #464646; }
+.icon-btn.danger { color: #ff8a8a; }
+
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn {
   border: 0;
   color: #fff;
@@ -90,13 +112,21 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .b-confirm { background: var(--green); }
 .b-neutral { background: var(--gray); }
 
-.right { padding: 8px; display: flex; flex-direction: column; }
-.detail {
-  flex: 1;
-  background: var(--panel);
-  color: var(--text);
-  white-space: pre-wrap;
-  line-height: 1.45;
+.right { padding: 8px; min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+.detail-scroll {
+  min-height: 0;
+  overflow: auto;
+  background: var(--panel2);
+  padding: 8px;
 }
+.detail { color: var(--text); white-space: pre-wrap; line-height: 1.45; }
 
-.hidden { display: none; }
+.middle-scroll::-webkit-scrollbar,
+.detail-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.middle-scroll::-webkit-scrollbar-track,
+.detail-scroll::-webkit-scrollbar-track { background: #1f1f1f; }
+.middle-scroll::-webkit-scrollbar-thumb,
+.detail-scroll::-webkit-scrollbar-thumb { background: #4b4b4b; border: 2px solid #1f1f1f; }
+.middle-scroll, .detail-scroll { scrollbar-color: #4b4b4b #1f1f1f; scrollbar-width: thin; }
+
+.hidden { display: none !important; }

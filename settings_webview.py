@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import json
 import time
 import threading
@@ -48,10 +48,11 @@ def main():
         state = json.load(f)
     api = Api(args.ipc, state)
     ui_path = (Path(__file__).parent / "web_settings_ui" / "index.html").resolve()
-    window = webview.create_window("设置", ui_path.as_uri(), js_api=api, width=760, height=420, resizable=True)
+    window = webview.create_window("设置", ui_path.as_uri(), js_api=api, width=760, height=420, min_size=(720, 420), resizable=True)
     api.set_window(window)
     webview.start()
 
 
 if __name__ == "__main__":
     main()
+
