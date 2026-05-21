@@ -1,9 +1,13 @@
 ﻿import configparser
 import ctypes
+import json
+import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,13 +18,17 @@ from pynput import keyboard, mouse
 
 CONFIG_PATH = Path(__file__).with_name("config.cfg")
 POLL_INTERVAL = 0.01
+HUD_FPS_OPTIONS = (15, 30, 60, 90, 120)
 
 
 @dataclass
 class AppConfig:
     control_mode: int = 1
+    steering_axis: str = "left_x"
     reference_range_x_px: float = 360.0
     reference_range_y_px: float = 260.0
+    reference_range_x_ratio: float = 0.1875
+    reference_range_y_ratio: float = 0.2407
     min_output_x: float = 0.235
     debug_mode: bool = False
     hud_fps: int = 25
@@ -32,10 +40,12 @@ class AppConfig:
     brake_mouse_button: str = "left"
     gear_up_button: str = "right_shoulder"
     gear_down_button: str = "left_shoulder"
+    gear_mapping_mode: str = "gamepad"
+    gear_up_key: str = "e"
+    gear_down_key: str = "q"
     hide_cursor_on_enable: bool = True
     windows_scale: float = 1.0
     fullscreen_scale: float = 1.0
-    settings_panel_scale: float = 1.0
     fullscreen_alpha: float = 0.00
 
 
@@ -97,6 +107,11 @@ def resolve_gamepad_button(name: str):
     mapping = {
         "right_shoulder": vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
         "left_shoulder": vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
+        "left_thumb": vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB,
+        "right_thumb": vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB,
+        "back": vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK,
+        "start": vg.XUSB_BUTTON.XUSB_GAMEPAD_START,
+        "guide": vg.XUSB_BUTTON.XUSB_GAMEPAD_GUIDE,
         "a": vg.XUSB_BUTTON.XUSB_GAMEPAD_A,
         "b": vg.XUSB_BUTTON.XUSB_GAMEPAD_B,
         "x": vg.XUSB_BUTTON.XUSB_GAMEPAD_X,
@@ -107,6 +122,34 @@ def resolve_gamepad_button(name: str):
         "dpad_right": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
     }
     return mapping.get(n, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER)
+
+
+def resolve_keyboard_key(name: str):
+    n = name.strip().lower()
+    special = {
+        "space": keyboard.Key.space,
+        "enter": keyboard.Key.enter,
+        "tab": keyboard.Key.tab,
+        "esc": keyboard.Key.esc,
+        "up": keyboard.Key.up,
+        "down": keyboard.Key.down,
+        "left": keyboard.Key.left,
+        "right": keyboard.Key.right,
+        "page_up": keyboard.Key.page_up,
+        "page_down": keyboard.Key.page_down,
+        "home": keyboard.Key.home,
+        "end": keyboard.Key.end,
+        "insert": keyboard.Key.insert,
+        "delete": keyboard.Key.delete,
+        "shift": keyboard.Key.shift,
+        "ctrl": keyboard.Key.ctrl,
+        "alt": keyboard.Key.alt,
+    }
+    if n in special:
+        return special[n]
+    if len(n) == 1 and (n.isalpha() or n.isdigit()):
+        return n
+    return "e"
 
 
 def set_cursor_visible(visible: bool) -> None:
@@ -121,6 +164,23 @@ def set_cursor_visible(visible: bool) -> None:
             for _ in range(8):
                 if user32.ShowCursor(False) < 0:
                     break
+    except Exception:
+        pass
+
+
+def clip_cursor_rect(rect: tuple[int, int, int, int] | None) -> None:
+    try:
+        user32 = ctypes.windll.user32
+        if rect is None:
+            user32.ClipCursor(None)
+            return
+        left, top, width, height = rect
+        rc = RECT()
+        rc.left = int(left)
+        rc.top = int(top)
+        rc.right = int(left + max(1, width))
+        rc.bottom = int(top + max(1, height))
+        user32.ClipCursor(ctypes.byref(rc))
     except Exception:
         pass
 
@@ -230,8 +290,11 @@ def load_config() -> AppConfig:
 
     if parser.has_section(section):
         cfg.control_mode = parser.getint(section, "control_mode", fallback=cfg.control_mode)
+        cfg.steering_axis = parser.get(section, "steering_axis", fallback=cfg.steering_axis)
         cfg.reference_range_x_px = parser.getfloat(section, "reference_range_x_px", fallback=cfg.reference_range_x_px)
         cfg.reference_range_y_px = parser.getfloat(section, "reference_range_y_px", fallback=cfg.reference_range_y_px)
+        cfg.reference_range_x_ratio = parser.getfloat(section, "reference_range_x_ratio", fallback=cfg.reference_range_x_ratio)
+        cfg.reference_range_y_ratio = parser.getfloat(section, "reference_range_y_ratio", fallback=cfg.reference_range_y_ratio)
         cfg.min_output_x = parser.getfloat(section, "min_output_x", fallback=cfg.min_output_x)
         cfg.debug_mode = parser.getboolean(section, "debug_mode", fallback=cfg.debug_mode)
         cfg.hud_fps = parser.getint(section, "hud_fps", fallback=cfg.hud_fps)
@@ -243,22 +306,33 @@ def load_config() -> AppConfig:
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
+        cfg.gear_mapping_mode = parser.get(section, "gear_mapping_mode", fallback=cfg.gear_mapping_mode)
+        cfg.gear_up_key = parser.get(section, "gear_up_key", fallback=cfg.gear_up_key)
+        cfg.gear_down_key = parser.get(section, "gear_down_key", fallback=cfg.gear_down_key)
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
         cfg.windows_scale = parser.getfloat(section, "windows_scale", fallback=cfg.windows_scale)
         cfg.fullscreen_scale = parser.getfloat(section, "fullscreen_scale", fallback=cfg.fullscreen_scale)
-        cfg.settings_panel_scale = parser.getfloat(section, "settings_panel_scale", fallback=cfg.settings_panel_scale)
         cfg.fullscreen_alpha = parser.getfloat(section, "fullscreen_alpha", fallback=cfg.fullscreen_alpha)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
+    if cfg.steering_axis not in {"left_x", "left_y", "right_x", "right_y"}:
+        cfg.steering_axis = "left_x"
     cfg.reference_range_x_px = max(1.0, cfg.reference_range_x_px)
     cfg.reference_range_y_px = max(1.0, cfg.reference_range_y_px)
+    # Backward compatible migration: if ratio missing/invalid, derive from old px baseline.
+    if not (0.01 <= cfg.reference_range_x_ratio <= 1.0):
+        cfg.reference_range_x_ratio = clamp(cfg.reference_range_x_px / 1920.0, 0.01, 1.0)
+    if not (0.01 <= cfg.reference_range_y_ratio <= 1.0):
+        cfg.reference_range_y_ratio = clamp(cfg.reference_range_y_px / 1080.0, 0.01, 1.0)
     cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 1.0)
-    cfg.hud_fps = int(clamp(cfg.hud_fps, 5, 240))
+    if cfg.hud_fps not in HUD_FPS_OPTIONS:
+        cfg.hud_fps = 60
     cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
-    cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 2.0)
-    cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 2.0)
-    cfg.settings_panel_scale = clamp(cfg.settings_panel_scale, 0.8, 2.0)
+    if cfg.gear_mapping_mode not in {"gamepad", "keyboard"}:
+        cfg.gear_mapping_mode = "gamepad"
+    cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 1.5)
+    cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 1.5)
     cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 0.95)
     return cfg
 
@@ -267,8 +341,11 @@ def save_default_config(cfg: AppConfig) -> None:
     parser = configparser.ConfigParser()
     parser["mapping"] = {
         "control_mode": str(cfg.control_mode),
+        "steering_axis": cfg.steering_axis,
         "reference_range_x_px": str(cfg.reference_range_x_px),
         "reference_range_y_px": str(cfg.reference_range_y_px),
+        "reference_range_x_ratio": f"{cfg.reference_range_x_ratio:.6f}",
+        "reference_range_y_ratio": f"{cfg.reference_range_y_ratio:.6f}",
         "min_output_x": str(cfg.min_output_x),
         "debug_mode": str(cfg.debug_mode).lower(),
         "hud_fps": str(cfg.hud_fps),
@@ -280,10 +357,12 @@ def save_default_config(cfg: AppConfig) -> None:
         "brake_mouse_button": cfg.brake_mouse_button,
         "gear_up_button": cfg.gear_up_button,
         "gear_down_button": cfg.gear_down_button,
+        "gear_mapping_mode": cfg.gear_mapping_mode,
+        "gear_up_key": cfg.gear_up_key,
+        "gear_down_key": cfg.gear_down_key,
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
         "windows_scale": f"{cfg.windows_scale:.2f}",
         "fullscreen_scale": f"{cfg.fullscreen_scale:.2f}",
-        "settings_panel_scale": f"{cfg.settings_panel_scale:.2f}",
         "fullscreen_alpha": f"{cfg.fullscreen_alpha:.2f}",
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
@@ -298,27 +377,35 @@ class Indicator:
         min_output_x: float = 0.235,
         windows_scale: float = 1.0,
         fullscreen_scale: float = 1.0,
-        settings_panel_scale: float = 1.0,
         fullscreen_alpha: float = 0.00,
         settings_getter=None,
         settings_apply_callback=None,
+        settings_open_callback=None,
     ) -> None:
         self.debug_mode = debug_mode
         self.hud_fps = int(clamp(hud_fps, 5, 240))
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
         self.min_output_x = clamp(min_output_x, 0.0, 1.0)
-        self.window_scale = clamp(windows_scale, 0.8, 2.0)
-        self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 2.0)
-        self.settings_panel_scale = clamp(settings_panel_scale, 0.8, 2.0)
+        self.window_scale = clamp(windows_scale, 0.8, 1.5)
+        self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 1.5)
         self.ui_scale = max(1.15, self.window_scale * 1.15)
         self.fullscreen_alpha = clamp(fullscreen_alpha, 0.0, 0.95)
         self.settings_getter = settings_getter
         self.settings_apply_callback = settings_apply_callback
+        self.settings_open_callback = settings_open_callback
         self.settings_window: tk.Toplevel | None = None
         self.settings_window_scale_var: tk.StringVar | None = None
         self.settings_fullscreen_scale_var: tk.StringVar | None = None
-        self.settings_panel_scale_var: tk.StringVar | None = None
         self.settings_min_output_var: tk.StringVar | None = None
+        self.settings_panel_widgets: list[tk.Widget] = []
+        self.settings_category_list: tk.Listbox | None = None
+        self.settings_webview_proc = None
+        self.settings_ipc_path = str(Path(tempfile.gettempdir()) / "fh_liner_settings_ipc.json")
+        self.settings_state_path = str(Path(tempfile.gettempdir()) / "fh_liner_settings_state.json")
+        self.settings_debug_log_path = str(Path(tempfile.gettempdir()) / "fh_liner_settings_webview.log")
+        self.settings_webview_log_handle = None
+        self.settings_ipc_last_ts = 0.0
+        self.local_error_text = ""
         self.fullscreen_mode = False
         self.fullscreen_available = True
         self.fullscreen_rect: tuple[int, int, int, int] | None = None
@@ -378,9 +465,12 @@ class Indicator:
         self.root.update_idletasks()
         self.apply_view_mode(False)
         self._init_scene()
+        self.root.after(250, self._poll_settings_ipc)
 
     def position_bottom_right(self) -> None:
         self.root.update_idletasks()
+        # Keep windowed HUD at a deterministic compact size.
+        # Do not use reqwidth/reqheight here; after fullscreen mode they can stay huge.
         w = int(round(390 * self.ui_scale))
         h = int(round((205 if self.debug_mode else 180) * self.ui_scale))
         sw = self.root.winfo_screenwidth()
@@ -694,224 +784,100 @@ class Indicator:
         if callable(self.settings_getter):
             return dict(self.settings_getter())
         return {
+            "hud_fps": self.hud_fps,
             "window_scale": self.window_scale,
             "fullscreen_scale": self.fullscreen_scale,
-            "settings_panel_scale": self.settings_panel_scale,
             "min_output_x": self.min_output_x,
         }
 
     def open_settings_panel(self) -> None:
-        if self.settings_window and self.settings_window.winfo_exists():
-            self.settings_window.focus_force()
-            self.settings_window.lift()
+        self._settings_debug_log("open_settings_panel called")
+        if self.settings_webview_proc is not None and self.settings_webview_proc.poll() is None:
+            self._settings_debug_log("webview already running")
+            self.local_error_text = "设置窗口已在运行"
             return
         baseline = self._get_live_settings()
-        win = tk.Toplevel(self.root)
-        win.title("设置")
-        panel_scale = clamp(float(baseline.get("settings_panel_scale", self.settings_panel_scale)), 0.8, 2.0)
-        win_w = int(round(840 * panel_scale))
-        win_h = int(round(300 * panel_scale))
-        win.geometry(f"{win_w}x{win_h}")
-        win.resizable(False, False)
-        win.configure(bg="#1f1f1f")
-        win.transient(self.root)
-        win.grab_set()
-        self.settings_window = win
-        self.settings_window_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('window_scale', self.window_scale)), 0.8, 2.0):.2f}")
-        self.settings_fullscreen_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('fullscreen_scale', self.fullscreen_scale)), 0.8, 2.0):.2f}")
-        self.settings_panel_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('settings_panel_scale', self.settings_panel_scale)), 0.8, 2.0):.2f}")
-        self.settings_min_output_var = tk.StringVar(value=f"{clamp(float(baseline.get('min_output_x', self.min_output_x)), 0.0, 1.0):.3f}")
-
-        root_panel = tk.Frame(win, bg="#1f1f1f")
-        root_panel.pack(fill="both", expand=True, padx=16, pady=16)
-        root_panel.grid_columnconfigure(1, weight=1)
-        root_panel.grid_columnconfigure(2, weight=0)
-        root_panel.grid_rowconfigure(0, weight=1)
-
-        left_panel = tk.Frame(root_panel, bg="#1f1f1f")
-        left_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
-        tk.Label(left_panel, text="设置类型", fg="#cfd8dc", bg="#1f1f1f", anchor="w").pack(fill="x", pady=(0, 6))
-        category_list = tk.Listbox(
-            left_panel,
-            height=8,
-            width=12,
-            activestyle="none",
-            exportselection=False,
-            bg="#2b2b2b",
-            fg="#ffffff",
-            selectbackground="#196d2d",
-            selectforeground="#ffffff",
-            bd=0,
-            highlightthickness=0,
-        )
-        category_list.pack(fill="y")
-        category_list.insert("end", "图像显示")
-        category_list.insert("end", "灵敏度")
-
-        right_panel = tk.Frame(root_panel, bg="#1f1f1f")
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
-        right_panel.grid_columnconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(0, weight=1)
-        detail_panel = tk.Frame(root_panel, bg="#1f1f1f")
-        detail_panel.grid(row=0, column=2, sticky="nsew")
-        detail_panel.configure(width=260)
-        detail_panel.pack_propagate(False)
-        tk.Label(detail_panel, text="提示详情", fg="#cfd8dc", bg="#1f1f1f", anchor="w").pack(fill="x", pady=(0, 6))
-        detail_text_var = tk.StringVar(value="")
-        detail_text_label = tk.Label(
-            detail_panel,
-            textvariable=detail_text_var,
-            fg="#f0f0f0",
-            bg="#2b2b2b",
-            anchor="nw",
-            justify="left",
-            wraplength=240,
-            padx=10,
-            pady=10,
-            bd=0,
-        )
-        detail_text_label.pack(fill="both", expand=True)
-
-        page_display = tk.Frame(right_panel, bg="#1f1f1f")
-        page_sense = tk.Frame(right_panel, bg="#1f1f1f")
-
-        category_names = {0: "图像显示", 1: "灵敏度"}
-        category_detail_map = {0: "", 1: ""}
-        current_category_idx = {"value": 0}
-
-        def _category_detail_text(idx: int) -> str:
-            category_name = category_names.get(idx, "当前分类")
-            detail = category_detail_map.get(idx, "")
-            if detail.strip():
-                return detail
-            return f"这是{category_name}的提示详情，目前为空"
-
-        def _show_category_detail() -> None:
-            detail_text_var.set(_category_detail_text(current_category_idx["value"]))
-
-        def _bind_hover_detail(widget: tk.Widget, text: str) -> None:
-            widget.bind("<Enter>", lambda _e: detail_text_var.set(text), add="+")
-            widget.bind("<Leave>", lambda _e: _show_category_detail(), add="+")
-
-        display_label_1 = tk.Label(page_display, text="小窗缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
-        display_label_1.grid(row=0, column=0, sticky="w", pady=(0, 8))
-        display_entry_1 = tk.Entry(page_display, textvariable=self.settings_window_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
-        display_entry_1.grid(row=0, column=1, sticky="w", pady=(0, 8))
-        display_label_2 = tk.Label(page_display, text="全屏缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
-        display_label_2.grid(row=1, column=0, sticky="w", pady=(0, 8))
-        display_entry_2 = tk.Entry(page_display, textvariable=self.settings_fullscreen_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
-        display_entry_2.grid(row=1, column=1, sticky="w", pady=(0, 8))
-        display_label_3 = tk.Label(page_display, text="设置面板缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
-        display_label_3.grid(row=2, column=0, sticky="w", pady=(0, 8))
-        display_entry_3 = tk.Entry(page_display, textvariable=self.settings_panel_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
-        display_entry_3.grid(row=2, column=1, sticky="w", pady=(0, 8))
-
-        sense_label = tk.Label(page_sense, text="非零方向起始输出 (0 - 1)", fg="#f0f0f0", bg="#1f1f1f", anchor="w")
-        sense_label.grid(row=0, column=0, sticky="w", pady=(0, 8))
-        sense_entry = tk.Entry(page_sense, textvariable=self.settings_min_output_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff")
-        sense_entry.grid(row=0, column=1, sticky="w", pady=(0, 8))
-        reset_btn = tk.Button(page_sense, text="重置默认", command=self._reset_settings_defaults, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0)
-        reset_btn.grid(row=0, column=2, sticky="w", padx=(8, 0), pady=(0, 8))
-
-        _bind_hover_detail(display_label_1, "调整小窗界面的整体显示比例，不影响全屏显示比例。")
-        _bind_hover_detail(display_entry_1, "输入 0.8 到 2.0 之间的数字。")
-        _bind_hover_detail(display_label_2, "调整全屏界面的整体显示比例，不影响小窗显示比例。")
-        _bind_hover_detail(display_entry_2, "输入 0.8 到 2.0 之间的数字。")
-        _bind_hover_detail(display_label_3, "调整设置面板本身的显示大小。")
-        _bind_hover_detail(display_entry_3, "输入 0.8 到 2.0 之间的数字。")
-        _bind_hover_detail(sense_label, "设置方向开始输出的最小非零值，数值越大起步越灵敏。")
-        _bind_hover_detail(sense_entry, "输入 0 到 1 之间的数字。")
-        _bind_hover_detail(reset_btn, "将非零方向起始输出恢复到默认值 0.235。")
-
-        page_display.grid(row=0, column=0, sticky="nw")
-        page_sense.grid(row=0, column=0, sticky="nw")
-        page_sense.grid_remove()
-
-        def _switch_settings_page(_event=None):
-            idxs = category_list.curselection()
-            idx = idxs[0] if idxs else 0
-            current_category_idx["value"] = idx
-            if idx == 0:
-                page_sense.grid_remove()
-                page_display.grid()
-            else:
-                page_display.grid_remove()
-                page_sense.grid()
-            _show_category_detail()
-
-        category_list.selection_set(0)
-        category_list.bind("<<ListboxSelect>>", _switch_settings_page)
-        _show_category_detail()
-
-        actions = tk.Frame(right_panel, bg="#1f1f1f")
-        actions.grid(row=1, column=0, sticky="e", pady=(18, 0))
-        tk.Button(actions, text="确认并应用", command=self._confirm_settings, bg="#196d2d", fg="#ffffff", activebackground="#238a3b", activeforeground="#ffffff", bd=0, padx=12).pack(side="left", padx=(0, 8))
-        tk.Button(actions, text="关闭", command=self._close_settings_with_prompt, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, padx=12).pack(side="left")
-        win.protocol("WM_DELETE_WINDOW", self._close_settings_with_prompt)
-
-    def _reset_settings_defaults(self) -> None:
-        if self.settings_min_output_var is not None:
-            self.settings_min_output_var.set("0.235")
-
-    def _parse_settings_from_form(self) -> dict | None:
+        self._settings_debug_log(f"baseline={baseline}")
+        script_path = Path(__file__).with_name("settings_webview.py")
+        if not script_path.exists():
+            self.local_error_text = "未找到 settings_webview.py"
+            self._settings_debug_log("settings_webview.py missing")
+            return
         try:
-            window_scale = clamp(float(self.settings_window_scale_var.get()), 0.8, 2.0)
-            fullscreen_scale = clamp(float(self.settings_fullscreen_scale_var.get()), 0.8, 2.0)
-            settings_panel_scale = clamp(float(self.settings_panel_scale_var.get()), 0.8, 2.0)
-            min_output_x = clamp(float(self.settings_min_output_var.get()), 0.0, 1.0)
-            return {"window_scale": window_scale, "fullscreen_scale": fullscreen_scale, "settings_panel_scale": settings_panel_scale, "min_output_x": min_output_x}
-        except Exception:
-            messagebox.showerror("设置错误", "请输入有效数字。")
-            return None
+            with open(self.settings_state_path, "w", encoding="utf-8") as f:
+                json.dump(baseline, f, ensure_ascii=False)
+            if self.settings_webview_log_handle is not None:
+                try:
+                    self.settings_webview_log_handle.close()
+                except Exception:
+                    pass
+                self.settings_webview_log_handle = None
+            self.settings_webview_log_handle = open(self.settings_debug_log_path, "a", encoding="utf-8")
+            self._settings_debug_log("starting settings_webview subprocess")
+            self.settings_webview_proc = subprocess.Popen(
+                [sys.executable, str(script_path), "--ipc", self.settings_ipc_path, "--state-file", self.settings_state_path],
+                cwd=str(Path(__file__).parent),
+                stdout=self.settings_webview_log_handle,
+                stderr=self.settings_webview_log_handle,
+            )
+            self.local_error_text = f"设置窗口启动中 pid={self.settings_webview_proc.pid}"
+            if callable(self.settings_open_callback):
+                self.settings_open_callback(True)
+            self.root.after(900, self._check_settings_webview_started)
+        except Exception as exc:
+            self.local_error_text = f"打开Web设置窗口失败: {exc}"
+            self._settings_debug_log(f"subprocess start failed: {exc}")
 
-    def _settings_form_changed(self, baseline: dict) -> bool:
-        parsed = self._parse_settings_from_form()
-        if parsed is None:
-            return False
-        return (
-            abs(parsed["window_scale"] - float(baseline.get("window_scale", self.window_scale))) > 1e-6
-            or abs(parsed["fullscreen_scale"] - float(baseline.get("fullscreen_scale", self.fullscreen_scale))) > 1e-6
-            or abs(parsed["settings_panel_scale"] - float(baseline.get("settings_panel_scale", self.settings_panel_scale))) > 1e-6
-            or abs(parsed["min_output_x"] - float(baseline.get("min_output_x", self.min_output_x))) > 1e-6
-        )
+    def _settings_debug_log(self, msg: str) -> None:
+        try:
+            line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
+            with open(self.settings_debug_log_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
+    def _check_settings_webview_started(self) -> None:
+        try:
+            p = self.settings_webview_proc
+            if p is None:
+                self.local_error_text = "设置窗口未启动(进程对象为空)"
+                self._settings_debug_log("check: process is None")
+                return
+            rc = p.poll()
+            if rc is None:
+                self.local_error_text = f"设置窗口运行中 pid={p.pid}"
+                self._settings_debug_log(f"check: running pid={p.pid}")
+                return
+            if callable(self.settings_open_callback):
+                self.settings_open_callback(False)
+            self._settings_debug_log(f"check: exited rc={rc}")
+            tail = ""
+            try:
+                with open(self.settings_debug_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    data = f.read()
+                tail = data[-240:].replace("\n", " | ")
+            except Exception:
+                pass
+            self.local_error_text = f"设置窗口启动失败 rc={rc} 日志:{tail}"
+        except Exception as exc:
+            self.local_error_text = f"检查设置窗口状态失败: {exc}"
 
     def _apply_settings_values(self, values: dict, save_to_file: bool) -> None:
-        self.window_scale = clamp(float(values["window_scale"]), 0.8, 2.0)
-        self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 2.0)
-        self.settings_panel_scale = clamp(float(values["settings_panel_scale"]), 0.8, 2.0)
+        try:
+            requested_fps = int(values.get("hud_fps", self.hud_fps))
+        except Exception:
+            requested_fps = self.hud_fps
+        self.hud_fps = requested_fps if requested_fps in HUD_FPS_OPTIONS else 60
+        self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
+        self.window_scale = clamp(float(values["window_scale"]), 0.8, 1.5)
+        self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 1.5)
         self.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         if callable(self.settings_apply_callback):
             self.settings_apply_callback(dict(values), save_to_file)
         self._apply_ui_scale()
         self._init_scene()
-
-    def _confirm_settings(self) -> None:
-        parsed = self._parse_settings_from_form()
-        if parsed is None:
-            return
-        self._apply_settings_values(parsed, save_to_file=True)
-        self._destroy_settings_window()
-
-    def _destroy_settings_window(self) -> None:
-        if self.settings_window and self.settings_window.winfo_exists():
-            self.settings_window.grab_release()
-            self.settings_window.destroy()
-        self.settings_window = None
-
-    def _close_settings_with_prompt(self) -> None:
-        baseline = self._get_live_settings()
-        if not self._settings_form_changed(baseline):
-            self._destroy_settings_window()
-            return
-        save_choice = messagebox.askyesnocancel("保存设置", "检测到修改，是否保存并应用？")
-        if save_choice is None:
-            return
-        if save_choice:
-            parsed = self._parse_settings_from_form()
-            if parsed is None:
-                return
-            self._apply_settings_values(parsed, save_to_file=True)
-        self._destroy_settings_window()
+        if not self.fullscreen_mode:
+            self.position_bottom_right()
 
     def _draw_lx(self, lx: float) -> None:
         # Display scale for steering:
@@ -932,6 +898,28 @@ class Indicator:
         left = cx + (half * min(0.0, view))
         right = cx + (half * max(0.0, view))
         self.canvas.coords(self.scene["lx_fill"], left, y0 + 1, right, y1 - 1)
+
+    def _poll_settings_ipc(self) -> None:
+        try:
+            if os.path.exists(self.settings_ipc_path):
+                with open(self.settings_ipc_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                ts = float(payload.get("ts", 0.0))
+                if ts > self.settings_ipc_last_ts:
+                    self.settings_ipc_last_ts = ts
+                    values = payload.get("values")
+                    if isinstance(values, dict):
+                        self._apply_settings_values(values, save_to_file=True)
+                        self.local_error_text = "设置已应用"
+                    if payload.get("close", False) and self.settings_webview_proc is not None:
+                        if self.settings_webview_proc.poll() is None:
+                            self.settings_webview_proc = None
+                        if callable(self.settings_open_callback):
+                            self.settings_open_callback(False)
+        except Exception:
+            pass
+        finally:
+            self.root.after(250, self._poll_settings_ipc)
 
     def _draw_pedals(self, gas: bool, brake: bool, rt: float, lt: float) -> None:
         lt = clamp(lt, 0.0, 1.0)
@@ -1033,7 +1021,8 @@ class Indicator:
         self.mode_label.config(text=f"模式{mode}: {mode_names.get(mode, '未知')}  (Shift+V开关 / Alt+Shift+V切模式)")
         self._draw_lx(state.left_x)
         self._draw_pedals(state.gas_active, state.brake_active, state.rt, state.lt)
-        self.error_label.config(text=state.last_error)
+        shown_error = self.local_error_text if self.local_error_text else state.last_error
+        self.error_label.config(text=shown_error)
         if self.debug_mode:
             self.debug_label.config(text=state.debug_text)
         else:
@@ -1041,7 +1030,7 @@ class Indicator:
         if self.fullscreen_mode:
             self.canvas.itemconfig(self.scene["status_text"], text=("状态: ON" if state.enabled else "状态: OFF"), fill=("#7dff9b" if state.enabled else "#ff6b6b"))
             self.canvas.itemconfig(self.scene["mode_text"], text=f"模式{mode}: {mode_names.get(mode, '未知')}")
-            self.canvas.itemconfig(self.scene["error_text"], text=state.last_error)
+            self.canvas.itemconfig(self.scene["error_text"], text=shown_error)
             self.canvas.itemconfig(self.scene["debug_text"], text=(state.debug_text if self.debug_mode else ""))
     def loop(
         self,
@@ -1094,7 +1083,13 @@ class MouseToVirtualGamepad:
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
         self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
         self.gear_down_btn = resolve_gamepad_button(self.config.gear_down_button)
+        self.gear_up_key = resolve_keyboard_key(self.config.gear_up_key)
+        self.gear_down_key = resolve_keyboard_key(self.config.gear_down_key)
+        self.keyboard_controller = keyboard.Controller()
+        self.gear_up_key_down = False
+        self.gear_down_key_down = False
         self.cursor_hidden = False
+        self.mouse_clip_rect: tuple[int, int, int, int] | None = None
         self.relative_center = None
         self.ignore_move_events = 0
         self.raw_last_pos = None
@@ -1103,6 +1098,7 @@ class MouseToVirtualGamepad:
         self.hud_fullscreen_enabled = False
         self.hud_fullscreen_rect: tuple[int, int, int, int] | None = None
         self.hud_fullscreen_supported = True
+        self.settings_panel_open = False
 
         try:
             self.pad = vg.VX360Gamepad()
@@ -1113,17 +1109,63 @@ class MouseToVirtualGamepad:
 
     def get_runtime_settings(self) -> dict:
         return {
+            "hud_fps": self.config.hud_fps,
+            "control_mode": self.config.control_mode,
+            "steering_axis": self.config.steering_axis,
+            "toggle_hotkey": self.config.toggle_hotkey,
+            "switch_mode_hotkey": self.config.switch_mode_hotkey,
+            "toggle_fullscreen_hotkey": self.config.toggle_fullscreen_hotkey,
+            "gear_mapping_mode": self.config.gear_mapping_mode,
+            "gear_up_button": self.config.gear_up_button,
+            "gear_down_button": self.config.gear_down_button,
+            "gear_up_key": self.config.gear_up_key,
+            "gear_down_key": self.config.gear_down_key,
+            "gear_pulse_ms": self.config.gear_pulse_ms,
+            "hide_cursor_on_enable": self.config.hide_cursor_on_enable,
             "window_scale": self.config.windows_scale,
             "fullscreen_scale": self.config.fullscreen_scale,
-            "settings_panel_scale": self.config.settings_panel_scale,
             "min_output_x": self.config.min_output_x,
         }
 
     def apply_runtime_settings(self, values: dict, save_to_file: bool) -> None:
-        self.config.windows_scale = clamp(float(values["window_scale"]), 0.8, 2.0)
-        self.config.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 2.0)
-        self.config.settings_panel_scale = clamp(float(values["settings_panel_scale"]), 0.8, 2.0)
+        try:
+            hud_fps = int(values.get("hud_fps", self.config.hud_fps))
+        except Exception:
+            hud_fps = self.config.hud_fps
+        self.config.hud_fps = hud_fps if hud_fps in HUD_FPS_OPTIONS else 60
+        try:
+            control_mode = int(values.get("control_mode", self.config.control_mode))
+        except Exception:
+            control_mode = self.config.control_mode
+        self.config.control_mode = int(clamp(control_mode, 1, 4))
+        steering_axis = str(values.get("steering_axis", self.config.steering_axis)).strip().lower()
+        if steering_axis in {"left_x", "left_y", "right_x", "right_y"}:
+            self.config.steering_axis = steering_axis
+        self.config.toggle_hotkey = str(values.get("toggle_hotkey", self.config.toggle_hotkey)).strip() or "shift+v"
+        self.config.switch_mode_hotkey = str(values.get("switch_mode_hotkey", self.config.switch_mode_hotkey)).strip() or "alt+shift+v"
+        self.config.toggle_fullscreen_hotkey = str(values.get("toggle_fullscreen_hotkey", self.config.toggle_fullscreen_hotkey)).strip() or "alt+f"
+        mode = str(values.get("gear_mapping_mode", self.config.gear_mapping_mode)).strip().lower()
+        self.config.gear_mapping_mode = mode if mode in {"gamepad", "keyboard"} else "gamepad"
+        self.config.gear_up_button = str(values.get("gear_up_button", self.config.gear_up_button)).strip() or "right_shoulder"
+        self.config.gear_down_button = str(values.get("gear_down_button", self.config.gear_down_button)).strip() or "left_shoulder"
+        self.config.gear_up_key = str(values.get("gear_up_key", self.config.gear_up_key)).strip().lower() or "e"
+        self.config.gear_down_key = str(values.get("gear_down_key", self.config.gear_down_key)).strip().lower() or "q"
+        try:
+            pulse = int(values.get("gear_pulse_ms", self.config.gear_pulse_ms))
+        except Exception:
+            pulse = self.config.gear_pulse_ms
+        self.config.gear_pulse_ms = int(clamp(pulse, 10, 300))
+        self.config.hide_cursor_on_enable = bool(values.get("hide_cursor_on_enable", self.config.hide_cursor_on_enable))
+        self.config.windows_scale = clamp(float(values["window_scale"]), 0.8, 1.5)
+        self.config.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 1.5)
         self.config.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
+        self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
+        self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
+        self.toggle_fullscreen_combo = parse_hotkey_combo(self.config.toggle_fullscreen_hotkey)
+        self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
+        self.gear_down_btn = resolve_gamepad_button(self.config.gear_down_button)
+        self.gear_up_key = resolve_keyboard_key(self.config.gear_up_key)
+        self.gear_down_key = resolve_keyboard_key(self.config.gear_down_key)
         if save_to_file:
             save_default_config(self.config)
         self.state.last_error = "设置已应用"
@@ -1137,11 +1179,36 @@ class MouseToVirtualGamepad:
             self.state.right_y = 0.0
 
     def _virtual_screen_center(self) -> tuple[int, int]:
-        x, y = self.mouse_controller.position
-        left, top, width, height = get_monitor_rect_from_point(int(x), int(y))
+        rect = self.mouse_clip_rect
+        if rect is None:
+            x, y = self.mouse_controller.position
+            rect = get_monitor_rect_from_point(int(x), int(y))
+        left, top, width, height = rect
         if width > 0 and height > 0:
             return (int(left + width // 2), int(top + height // 2))
+        x, y = self.mouse_controller.position
         return (int(x), int(y))
+
+    def _effective_reference_ranges(self) -> tuple[float, float]:
+        rect = self.mouse_clip_rect
+        if rect is None:
+            x, y = self.mouse_controller.position
+            rect = get_monitor_rect_from_point(int(x), int(y))
+        _, _, width, height = rect
+        if width <= 0 or height <= 0:
+            return (self.config.reference_range_x_px, self.config.reference_range_y_px)
+        rx = max(1.0, width * self.config.reference_range_x_ratio)
+        ry = max(1.0, height * self.config.reference_range_y_ratio)
+        return (rx, ry)
+
+    @staticmethod
+    def _clamp_point_to_rect(x: int, y: int, rect: tuple[int, int, int, int] | None) -> tuple[int, int]:
+        if rect is None:
+            return (x, y)
+        left, top, width, height = rect
+        right = left + max(1, width) - 1
+        bottom = top + max(1, height) - 1
+        return (int(clamp(x, left, right)), int(clamp(y, top, bottom)))
 
     def _warp_to_center(self) -> None:
         if self.relative_center is None:
@@ -1156,6 +1223,9 @@ class MouseToVirtualGamepad:
         if enabled:
             self.axis_x = 0.0
             self.axis_y = 0.0
+            mx, my = self.mouse_controller.position
+            self.mouse_clip_rect = get_monitor_rect_from_point(int(mx), int(my))
+            clip_cursor_rect(self.mouse_clip_rect)
             self.set_reference_to_current_mouse()
             if self.config.hide_cursor_on_enable and not self.cursor_hidden:
                 set_cursor_visible(False)
@@ -1164,6 +1234,8 @@ class MouseToVirtualGamepad:
             self._warp_to_center()
             self.state.last_error = "已开启"
         else:
+            clip_cursor_rect(None)
+            self.mouse_clip_rect = None
             if self.cursor_hidden:
                 set_cursor_visible(True)
                 self.cursor_hidden = False
@@ -1182,11 +1254,14 @@ class MouseToVirtualGamepad:
         self.state.brake_active = False
         self.state.rt = 0.0
         self.state.lt = 0.0
+        self._update_keyboard_shift_state(False, False)
         self.push_to_gamepad()
 
     def on_key_press(self, key) -> None:
         token = normalize_key_token(key)
         if token is None:
+            return
+        if self.settings_panel_open:
             return
         self.pressed_keys.add(token)
 
@@ -1237,16 +1312,18 @@ class MouseToVirtualGamepad:
             if self.state.enabled:
                 if self.ignore_move_events > 0:
                     self.ignore_move_events -= 1
-                    self.raw_last_pos = (x, y)
+                    self.raw_last_pos = self._clamp_point_to_rect(x, y, self.mouse_clip_rect)
                     return
+                x, y = self._clamp_point_to_rect(x, y, self.mouse_clip_rect)
                 if self.raw_last_pos is None:
                     self.raw_last_pos = (x, y)
                     return
                 dx = x - self.raw_last_pos[0]
                 dy = y - self.raw_last_pos[1]
                 self.raw_last_pos = (x, y)
-                self.axis_x = clamp(self.axis_x + (dx / self.config.reference_range_x_px), -1.0, 1.0)
-                self.axis_y = clamp(self.axis_y + (dy / self.config.reference_range_y_px), -1.0, 1.0)
+                rx, ry = self._effective_reference_ranges()
+                self.axis_x = clamp(self.axis_x + (dx / rx), -1.0, 1.0)
+                self.axis_y = clamp(self.axis_y + (dy / ry), -1.0, 1.0)
                 do_warp = True
             else:
                 self.current_pos = (x, y)
@@ -1333,24 +1410,61 @@ class MouseToVirtualGamepad:
         )
 
     def push_to_gamepad(self) -> None:
-        if self.pad is None:
-            return
-
-        lx = to_xinput_short(self.state.left_x)
-        ry = to_xinput_short(0.0)
+        steer = to_xinput_short(self.state.left_x)
+        lx = 0
+        ly = 0
+        rx = 0
+        ry = 0
+        if self.config.steering_axis == "left_x":
+            lx = steer
+        elif self.config.steering_axis == "left_y":
+            ly = steer
+        elif self.config.steering_axis == "right_x":
+            rx = steer
+        elif self.config.steering_axis == "right_y":
+            ry = steer
         rt = int(clamp(self.state.rt, 0.0, 1.0) * 255)
         lt = int(clamp(self.state.lt, 0.0, 1.0) * 255)
         now = time.time()
         gear_up_pressed = now < self.gear_up_until
         gear_down_pressed = now < self.gear_down_until
 
-        self.pad.left_joystick(x_value=lx, y_value=0)
-        self.pad.right_joystick(x_value=0, y_value=ry)
-        self.pad.right_trigger(value=rt)
-        self.pad.left_trigger(value=lt)
-        self.pad.press_button(button=self.gear_up_btn) if gear_up_pressed else self.pad.release_button(button=self.gear_up_btn)
-        self.pad.press_button(button=self.gear_down_btn) if gear_down_pressed else self.pad.release_button(button=self.gear_down_btn)
-        self.pad.update()
+        if self.pad is not None:
+            self.pad.left_joystick(x_value=lx, y_value=ly)
+            self.pad.right_joystick(x_value=rx, y_value=ry)
+            self.pad.right_trigger(value=rt)
+            self.pad.left_trigger(value=lt)
+        if self.config.gear_mapping_mode == "keyboard":
+            if self.pad is not None:
+                self.pad.release_button(button=self.gear_up_btn)
+                self.pad.release_button(button=self.gear_down_btn)
+            self._update_keyboard_shift_state(gear_up_pressed, gear_down_pressed)
+        else:
+            self._update_keyboard_shift_state(False, False)
+            if self.pad is not None:
+                self.pad.press_button(button=self.gear_up_btn) if gear_up_pressed else self.pad.release_button(button=self.gear_up_btn)
+                self.pad.press_button(button=self.gear_down_btn) if gear_down_pressed else self.pad.release_button(button=self.gear_down_btn)
+        if self.pad is not None:
+            self.pad.update()
+
+    def _update_keyboard_shift_state(self, up_pressed: bool, down_pressed: bool) -> None:
+        try:
+            if up_pressed and not self.gear_up_key_down:
+                self.keyboard_controller.press(self.gear_up_key)
+                self.gear_up_key_down = True
+            elif not up_pressed and self.gear_up_key_down:
+                self.keyboard_controller.release(self.gear_up_key)
+                self.gear_up_key_down = False
+
+            if down_pressed and not self.gear_down_key_down:
+                self.keyboard_controller.press(self.gear_down_key)
+                self.gear_down_key_down = True
+            elif not down_pressed and self.gear_down_key_down:
+                self.keyboard_controller.release(self.gear_down_key)
+                self.gear_down_key_down = False
+        except Exception:
+            self.gear_up_key_down = False
+            self.gear_down_key_down = False
 
     def worker_loop(self) -> None:
         kb_listener = keyboard.Listener(on_press=self.on_key_press, on_release=self.on_key_release)
@@ -1372,6 +1486,8 @@ class MouseToVirtualGamepad:
                 ms_listener.stop()
             except Exception:
                 pass
+            clip_cursor_rect(None)
+            self.mouse_clip_rect = None
             if self.cursor_hidden:
                 set_cursor_visible(True)
                 self.cursor_hidden = False
@@ -1384,10 +1500,10 @@ class MouseToVirtualGamepad:
             min_output_x=self.config.min_output_x,
             windows_scale=self.config.windows_scale,
             fullscreen_scale=self.config.fullscreen_scale,
-            settings_panel_scale=self.config.settings_panel_scale,
             fullscreen_alpha=self.config.fullscreen_alpha,
             settings_getter=self.get_runtime_settings,
             settings_apply_callback=self.apply_runtime_settings,
+            settings_open_callback=self.set_settings_panel_open,
         )
         indicator.root.protocol("WM_DELETE_WINDOW", self.stop_event.set)
 
@@ -1414,6 +1530,12 @@ class MouseToVirtualGamepad:
             self.hud_fullscreen_rect = None
             if not available:
                 self.state.last_error = "透明全屏HUD初始化失败，已自动回到小窗模式"
+
+    def set_settings_panel_open(self, is_open: bool) -> None:
+        self.settings_panel_open = bool(is_open)
+        if self.settings_panel_open:
+            self.pressed_keys.clear()
+            self.handled_combos.clear()
 
 
 if __name__ == "__main__":

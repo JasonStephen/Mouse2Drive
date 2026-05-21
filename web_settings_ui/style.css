@@ -1,0 +1,102 @@
+:root {
+  --bg: #1f1f1f;
+  --panel: #2b2b2b;
+  --text: #f0f0f0;
+  --muted: #cfd8dc;
+  --green: #196d2d;
+  --blue: #2a5d9f;
+  --gray: #3a3a3a;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; }
+
+.layout {
+  height: 100%;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 96px 1fr 220px;
+  gap: 10px;
+}
+
+.card { background: var(--panel); }
+.title { color: var(--muted); margin-bottom: 8px; white-space: nowrap; }
+
+.left { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.tab {
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab.active { background: var(--green); }
+
+.middle { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
+.page { display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.subttl { color: var(--muted); margin: 6px 0 4px; white-space: nowrap; }
+
+.lbl {
+  width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: ew-resize;
+}
+
+.inp {
+  width: 72px;
+  text-align: center;
+  padding: 4px 8px;
+  border: 1px solid #454545;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+.inp-wide {
+  width: 220px;
+  text-align: left;
+  padding: 4px 8px;
+  border: 1px solid #454545;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+.hotkey.capturing { border-color: #4da3ff; box-shadow: 0 0 0 1px #4da3ff inset; }
+
+.sel {
+  width: 220px;
+  text-align: left;
+  padding: 4px 6px;
+  border: 1px solid #454545;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+
+
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.btn {
+  border: 0;
+  color: #fff;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.b-apply { background: var(--blue); }
+.b-confirm { background: var(--green); }
+.b-neutral { background: var(--gray); }
+
+.right { padding: 8px; display: flex; flex-direction: column; }
+.detail {
+  flex: 1;
+  background: var(--panel);
+  color: var(--text);
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.hidden { display: none; }
