@@ -304,7 +304,14 @@ class Indicator:
         self.locked = True
         self.fs_module_offset_x = 0
         self.fs_module_offset_y = 0
+        self.fs_lx_offset_x = 0
+        self.fs_lx_offset_y = 0
+        self.fs_brake_offset_x = 0
+        self.fs_brake_offset_y = 0
+        self.fs_gas_offset_x = 0
+        self.fs_gas_offset_y = 0
         self.fs_dragging_module = False
+        self.fs_drag_target = ""
         self.fs_drag_start_mouse_x = 0
         self.fs_drag_start_mouse_y = 0
         self.fs_drag_start_offset_x = 0
@@ -400,26 +407,64 @@ class Indicator:
 
     def _on_drag_release(self, _event) -> None:
         self.fs_dragging_module = False
+        self.fs_drag_target = ""
 
     def _on_fullscreen_drag_start(self, event) -> None:
-        if not self.locked and self._in_fs_module_bounds(event.x, event.y):
+        if self._in_fs_lock_bounds(event.x, event.y):
+            self.locked = not self.locked
+            self._update_fs_lock_visual()
+            return
+        if self.locked:
+            return
+        if self._in_fs_lx_bounds(event.x, event.y):
             self.fs_dragging_module = True
+            self.fs_drag_target = "lx"
+            self.fs_drag_start_mouse_x = event.x
+            self.fs_drag_start_mouse_y = event.y
+            self.fs_drag_start_offset_x = self.fs_lx_offset_x
+            self.fs_drag_start_offset_y = self.fs_lx_offset_y
+            return
+        if self._in_fs_brake_bounds(event.x, event.y):
+            self.fs_dragging_module = True
+            self.fs_drag_target = "brake"
+            self.fs_drag_start_mouse_x = event.x
+            self.fs_drag_start_mouse_y = event.y
+            self.fs_drag_start_offset_x = self.fs_brake_offset_x
+            self.fs_drag_start_offset_y = self.fs_brake_offset_y
+            return
+        if self._in_fs_gas_bounds(event.x, event.y):
+            self.fs_dragging_module = True
+            self.fs_drag_target = "gas"
+            self.fs_drag_start_mouse_x = event.x
+            self.fs_drag_start_mouse_y = event.y
+            self.fs_drag_start_offset_x = self.fs_gas_offset_x
+            self.fs_drag_start_offset_y = self.fs_gas_offset_y
+            return
+        if self._in_fs_module_bounds(event.x, event.y):
+            self.fs_dragging_module = True
+            self.fs_drag_target = "module"
             self.fs_drag_start_mouse_x = event.x
             self.fs_drag_start_mouse_y = event.y
             self.fs_drag_start_offset_x = self.fs_module_offset_x
             self.fs_drag_start_offset_y = self.fs_module_offset_y
-            return
-        if self._in_fs_lock_bounds(event.x, event.y):
-            self.locked = not self.locked
-            self._update_fs_lock_visual()
 
     def _on_fullscreen_drag_move(self, event) -> None:
         if not self.fs_dragging_module:
             return
         dx = event.x - self.fs_drag_start_mouse_x
         dy = event.y - self.fs_drag_start_mouse_y
-        self.fs_module_offset_x = self.fs_drag_start_offset_x + dx
-        self.fs_module_offset_y = self.fs_drag_start_offset_y + dy
+        if self.fs_drag_target == "lx":
+            self.fs_lx_offset_x = self.fs_drag_start_offset_x + dx
+            self.fs_lx_offset_y = self.fs_drag_start_offset_y + dy
+        elif self.fs_drag_target == "brake":
+            self.fs_brake_offset_x = self.fs_drag_start_offset_x + dx
+            self.fs_brake_offset_y = self.fs_drag_start_offset_y + dy
+        elif self.fs_drag_target == "gas":
+            self.fs_gas_offset_x = self.fs_drag_start_offset_x + dx
+            self.fs_gas_offset_y = self.fs_drag_start_offset_y + dy
+        else:
+            self.fs_module_offset_x = self.fs_drag_start_offset_x + dx
+            self.fs_module_offset_y = self.fs_drag_start_offset_y + dy
         self._init_scene()
 
     def ensure_on_screen(self) -> None:
@@ -499,32 +544,56 @@ class Indicator:
 
         ox = int(self.fs_module_offset_x)
         oy = int(self.fs_module_offset_y)
+        lx_ox = ox + int(self.fs_lx_offset_x)
+        lx_oy = oy + int(self.fs_lx_offset_y)
+        brake_ox = ox + int(self.fs_brake_offset_x)
+        brake_oy = oy + int(self.fs_brake_offset_y)
+        gas_ox = ox + int(self.fs_gas_offset_x)
+        gas_oy = oy + int(self.fs_gas_offset_y)
         center_x = sw // 2
         lx_w = int(sw * 0.34)
         lx_h = max(20, int(sh * 0.028))
         lx_y = int(sh * 0.75)
-        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2 + ox, lx_y - lx_h // 2 + oy, center_x + lx_w // 2 + ox, lx_y + lx_h // 2 + oy, outline="#c7c7c7", fill="")
-        c.create_line(center_x + ox, lx_y - lx_h // 2 - 8 + oy, center_x + ox, lx_y + lx_h // 2 + 8 + oy, fill="#e7eef5", width=2)
-        self.scene["lx_fill"] = c.create_rectangle(center_x + ox, lx_y - lx_h // 2 + 2 + oy, center_x + ox, lx_y + lx_h // 2 - 2 + oy, outline="", fill="#67b7ff")
+        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2 + lx_ox, lx_y - lx_h // 2 + lx_oy, center_x + lx_w // 2 + lx_ox, lx_y + lx_h // 2 + lx_oy, outline="#c7c7c7", fill="")
+        c.create_line(center_x + lx_ox, lx_y - lx_h // 2 - 8 + lx_oy, center_x + lx_ox, lx_y + lx_h // 2 + 8 + lx_oy, fill="#e7eef5", width=2)
+        self.scene["lx_fill"] = c.create_rectangle(center_x + lx_ox, lx_y - lx_h // 2 + 2 + lx_oy, center_x + lx_ox, lx_y + lx_h // 2 - 2 + lx_oy, outline="", fill="#67b7ff")
         bar_h = int(sh * 0.26)
         bar_w = max(18, int(sw * 0.012))
         bars_y0 = int(sh * 0.64) - bar_h // 2
         bars_y1 = bars_y0 + bar_h
-        bx = int(sw * 0.70) + ox
-        gx = int(sw * 0.77) + ox
-        self.scene["brake_track"] = c.create_rectangle(bx, bars_y0 + oy, bx + bar_w, bars_y1 + oy, outline="#c7c7c7", fill="")
-        self.scene["brake_fill"] = c.create_rectangle(bx + 1, bars_y1 - 1 + oy, bx + bar_w - 1, bars_y1 - 1 + oy, outline="", fill="#ff6b6b")
-        self.scene["gas_track"] = c.create_rectangle(gx, bars_y0 + oy, gx + bar_w, bars_y1 + oy, outline="#c7c7c7", fill="")
-        self.scene["gas_fill"] = c.create_rectangle(gx + 1, bars_y1 - 1 + oy, gx + bar_w - 1, bars_y1 - 1 + oy, outline="", fill="#37d45c")
-        c.create_text(bx + bar_w // 2, bars_y1 + 36 + oy, text="刹车", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
-        c.create_text(gx + bar_w // 2, bars_y1 + 36 + oy, text="油门", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
-        self.scene["brake_box"] = c.create_rectangle(bx - 22, bars_y0 + oy, bx - 8, bars_y0 + 14 + oy, outline="#c7c7c7", fill="")
-        self.scene["gas_box"] = c.create_rectangle(gx + bar_w + 8, bars_y0 + oy, gx + bar_w + 22, bars_y0 + 14 + oy, outline="#c7c7c7", fill="")
+        bx = int(sw * 0.70)
+        gx = int(sw * 0.77)
+        self.scene["brake_track"] = c.create_rectangle(bx + brake_ox, bars_y0 + brake_oy, bx + bar_w + brake_ox, bars_y1 + brake_oy, outline="#c7c7c7", fill="")
+        self.scene["brake_fill"] = c.create_rectangle(bx + 1 + brake_ox, bars_y1 - 1 + brake_oy, bx + bar_w - 1 + brake_ox, bars_y1 - 1 + brake_oy, outline="", fill="#ff6b6b")
+        self.scene["gas_track"] = c.create_rectangle(gx + gas_ox, bars_y0 + gas_oy, gx + bar_w + gas_ox, bars_y1 + gas_oy, outline="#c7c7c7", fill="")
+        self.scene["gas_fill"] = c.create_rectangle(gx + 1 + gas_ox, bars_y1 - 1 + gas_oy, gx + bar_w - 1 + gas_ox, bars_y1 - 1 + gas_oy, outline="", fill="#37d45c")
+        c.create_text(bx + bar_w // 2 + brake_ox, bars_y1 + 36 + brake_oy, text="刹车", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
+        c.create_text(gx + bar_w // 2 + gas_ox, bars_y1 + 36 + gas_oy, text="油门", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
+        self.scene["brake_box"] = c.create_rectangle(bx - 22 + brake_ox, bars_y0 + brake_oy, bx - 8 + brake_ox, bars_y0 + 14 + brake_oy, outline="#c7c7c7", fill="")
+        self.scene["gas_box"] = c.create_rectangle(gx + bar_w + 8 + gas_ox, bars_y0 + gas_oy, gx + bar_w + 22 + gas_ox, bars_y0 + 14 + gas_oy, outline="#c7c7c7", fill="")
+        self.fs_lx_bounds = (
+            center_x - lx_w // 2 + lx_ox - 10,
+            lx_y - lx_h // 2 + lx_oy - 14,
+            center_x + lx_w // 2 + lx_ox + 10,
+            lx_y + lx_h // 2 + lx_oy + 14,
+        )
+        self.fs_brake_bounds = (
+            bx - 26 + brake_ox,
+            bars_y0 - 8 + brake_oy,
+            bx + bar_w + 26 + brake_ox,
+            bars_y1 + 54 + brake_oy,
+        )
+        self.fs_gas_bounds = (
+            gx - 26 + gas_ox,
+            bars_y0 - 8 + gas_oy,
+            gx + bar_w + 26 + gas_ox,
+            bars_y1 + 54 + gas_oy,
+        )
         self.fs_module_bounds = (
-            min(center_x - lx_w // 2 + ox, bx - 26),
-            min(lx_y - lx_h // 2 - 12 + oy, bars_y0 + oy - 8),
-            max(center_x + lx_w // 2 + ox, gx + bar_w + 26),
-            max(lx_y + lx_h // 2 + 12 + oy, bars_y1 + oy + 54),
+            min(self.fs_lx_bounds[0], self.fs_brake_bounds[0], self.fs_gas_bounds[0]),
+            min(self.fs_lx_bounds[1], self.fs_brake_bounds[1], self.fs_gas_bounds[1]),
+            max(self.fs_lx_bounds[2], self.fs_brake_bounds[2], self.fs_gas_bounds[2]),
+            max(self.fs_lx_bounds[3], self.fs_brake_bounds[3], self.fs_gas_bounds[3]),
         )
 
     def _update_fs_lock_visual(self) -> None:
@@ -543,6 +612,24 @@ class Indicator:
         if not hasattr(self, "fs_module_bounds"):
             return False
         x0, y0, x1, y1 = self.fs_module_bounds
+        return x0 <= x <= x1 and y0 <= y <= y1
+
+    def _in_fs_lx_bounds(self, x: int, y: int) -> bool:
+        if not hasattr(self, "fs_lx_bounds"):
+            return False
+        x0, y0, x1, y1 = self.fs_lx_bounds
+        return x0 <= x <= x1 and y0 <= y <= y1
+
+    def _in_fs_brake_bounds(self, x: int, y: int) -> bool:
+        if not hasattr(self, "fs_brake_bounds"):
+            return False
+        x0, y0, x1, y1 = self.fs_brake_bounds
+        return x0 <= x <= x1 and y0 <= y <= y1
+
+    def _in_fs_gas_bounds(self, x: int, y: int) -> bool:
+        if not hasattr(self, "fs_gas_bounds"):
+            return False
+        x0, y0, x1, y1 = self.fs_gas_bounds
         return x0 <= x <= x1 and y0 <= y <= y1
 
     def _init_scene(self) -> None:
