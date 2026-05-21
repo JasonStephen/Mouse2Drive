@@ -37,10 +37,14 @@ class AppConfig:
     switch_mode_hotkey: str = "alt+shift+v"
     toggle_fullscreen_hotkey: str = "alt+f"
     open_settings_hotkey: str = "ctrl+shift+o"
+    fullscreen_mode: bool = False
     gas_mouse_button: str = "right"
     brake_mouse_button: str = "left"
     gas_output_button: str = "right_shoulder"
     brake_output_button: str = "left_shoulder"
+    gas_brake_mapping_mode: str = "gamepad"
+    gas_key: str = "w"
+    brake_key: str = "s"
     gear_up_button: str = "right_thumb"
     gear_down_button: str = "left_thumb"
     gear_mapping_mode: str = "gamepad"
@@ -327,12 +331,16 @@ def load_config() -> AppConfig:
         cfg.switch_mode_hotkey = parser.get(section, "switch_mode_hotkey", fallback=cfg.switch_mode_hotkey)
         cfg.toggle_fullscreen_hotkey = parser.get(section, "toggle_fullscreen_hotkey", fallback=cfg.toggle_fullscreen_hotkey)
         cfg.open_settings_hotkey = parser.get(section, "open_settings_hotkey", fallback=cfg.open_settings_hotkey)
+        cfg.fullscreen_mode = parser.getboolean(section, "fullscreen_mode", fallback=cfg.fullscreen_mode)
         cfg.gas_mouse_button = parser.get(section, "gas_mouse_button", fallback=cfg.gas_mouse_button)
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
         cfg.gas_output_button = parser.get(section, "gas_output_button", fallback=cfg.gas_output_button)
         cfg.brake_output_button = parser.get(section, "brake_output_button", fallback=cfg.brake_output_button)
+        cfg.gas_brake_mapping_mode = parser.get(section, "gas_brake_mapping_mode", fallback=cfg.gas_brake_mapping_mode)
+        cfg.gas_key = parser.get(section, "gas_key", fallback=cfg.gas_key)
+        cfg.brake_key = parser.get(section, "brake_key", fallback=cfg.brake_key)
         cfg.gear_mapping_mode = parser.get(section, "gear_mapping_mode", fallback=cfg.gear_mapping_mode)
         cfg.gear_up_key = parser.get(section, "gear_up_key", fallback=cfg.gear_up_key)
         cfg.gear_down_key = parser.get(section, "gear_down_key", fallback=cfg.gear_down_key)
@@ -358,6 +366,8 @@ def load_config() -> AppConfig:
     cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
     if cfg.gear_mapping_mode not in {"gamepad", "keyboard", "none"}:
         cfg.gear_mapping_mode = "gamepad"
+    if cfg.gas_brake_mapping_mode not in {"gamepad", "keyboard", "none"}:
+        cfg.gas_brake_mapping_mode = "gamepad"
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 1.5)
     cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 1.5)
     cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 0.95)
@@ -381,12 +391,16 @@ def save_default_config(cfg: AppConfig) -> None:
         "switch_mode_hotkey": cfg.switch_mode_hotkey,
         "toggle_fullscreen_hotkey": cfg.toggle_fullscreen_hotkey,
         "open_settings_hotkey": cfg.open_settings_hotkey,
+        "fullscreen_mode": str(cfg.fullscreen_mode).lower(),
         "gas_mouse_button": cfg.gas_mouse_button,
         "brake_mouse_button": cfg.brake_mouse_button,
         "gear_up_button": cfg.gear_up_button,
         "gear_down_button": cfg.gear_down_button,
         "gas_output_button": cfg.gas_output_button,
         "brake_output_button": cfg.brake_output_button,
+        "gas_brake_mapping_mode": cfg.gas_brake_mapping_mode,
+        "gas_key": cfg.gas_key,
+        "brake_key": cfg.brake_key,
         "gear_mapping_mode": cfg.gear_mapping_mode,
         "gear_up_key": cfg.gear_up_key,
         "gear_down_key": cfg.gear_down_key,
@@ -1120,6 +1134,8 @@ class MouseToVirtualGamepad:
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
         self.gas_output_btn = resolve_gamepad_button(self.config.gas_output_button)
         self.brake_output_btn = resolve_gamepad_button(self.config.brake_output_button)
+        self.gas_key_combo = resolve_keyboard_combo(self.config.gas_key)
+        self.brake_key_combo = resolve_keyboard_combo(self.config.brake_key)
         self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
         self.gear_down_btn = resolve_gamepad_button(self.config.gear_down_button)
         self.gear_up_keys = resolve_keyboard_combo(self.config.gear_up_key)
@@ -1127,6 +1143,8 @@ class MouseToVirtualGamepad:
         self.keyboard_controller = keyboard.Controller()
         self.gear_up_key_down = False
         self.gear_down_key_down = False
+        self.gas_key_down = False
+        self.brake_key_down = False
         self.cursor_hidden = False
         self.mouse_clip_rect: tuple[int, int, int, int] | None = None
         self.relative_center = None
@@ -1139,6 +1157,7 @@ class MouseToVirtualGamepad:
         self.hud_fullscreen_supported = True
         self.settings_panel_open = False
         self.open_settings_requested = False
+        self.hud_fullscreen_enabled = bool(self.config.fullscreen_mode)
 
         try:
             self.pad = vg.VX360Gamepad()
@@ -1156,10 +1175,14 @@ class MouseToVirtualGamepad:
             "switch_mode_hotkey": self.config.switch_mode_hotkey,
             "toggle_fullscreen_hotkey": self.config.toggle_fullscreen_hotkey,
             "open_settings_hotkey": self.config.open_settings_hotkey,
+            "fullscreen_mode": self.hud_fullscreen_enabled,
             "gas_mouse_button": self.config.gas_mouse_button,
             "brake_mouse_button": self.config.brake_mouse_button,
             "gas_output_button": self.config.gas_output_button,
             "brake_output_button": self.config.brake_output_button,
+            "gas_brake_mapping_mode": self.config.gas_brake_mapping_mode,
+            "gas_key": self.config.gas_key,
+            "brake_key": self.config.brake_key,
             "gear_mapping_mode": self.config.gear_mapping_mode,
             "gear_up_button": self.config.gear_up_button,
             "gear_down_button": self.config.gear_down_button,
@@ -1190,10 +1213,15 @@ class MouseToVirtualGamepad:
         self.config.switch_mode_hotkey = str(values.get("switch_mode_hotkey", self.config.switch_mode_hotkey)).strip() or "alt+shift+v"
         self.config.toggle_fullscreen_hotkey = str(values.get("toggle_fullscreen_hotkey", self.config.toggle_fullscreen_hotkey)).strip() or "alt+f"
         self.config.open_settings_hotkey = str(values.get("open_settings_hotkey", self.config.open_settings_hotkey)).strip() or "ctrl+shift+o"
+        self.config.fullscreen_mode = bool(values.get("fullscreen_mode", self.config.fullscreen_mode))
         self.config.gas_mouse_button = str(values.get("gas_mouse_button", self.config.gas_mouse_button)).strip().lower() or "right"
         self.config.brake_mouse_button = str(values.get("brake_mouse_button", self.config.brake_mouse_button)).strip().lower() or "left"
         self.config.gas_output_button = str(values.get("gas_output_button", self.config.gas_output_button)).strip().lower() or "right_shoulder"
         self.config.brake_output_button = str(values.get("brake_output_button", self.config.brake_output_button)).strip().lower() or "left_shoulder"
+        pedal_mode = str(values.get("gas_brake_mapping_mode", self.config.gas_brake_mapping_mode)).strip().lower()
+        self.config.gas_brake_mapping_mode = pedal_mode if pedal_mode in {"gamepad", "keyboard", "none"} else "gamepad"
+        self.config.gas_key = str(values.get("gas_key", self.config.gas_key)).strip().lower() or "w"
+        self.config.brake_key = str(values.get("brake_key", self.config.brake_key)).strip().lower() or "s"
         mode = str(values.get("gear_mapping_mode", self.config.gear_mapping_mode)).strip().lower()
         self.config.gear_mapping_mode = mode if mode in {"gamepad", "keyboard", "none"} else "gamepad"
         self.config.gear_up_button = str(values.get("gear_up_button", self.config.gear_up_button)).strip().lower() or "right_thumb"
@@ -1217,10 +1245,19 @@ class MouseToVirtualGamepad:
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
         self.gas_output_btn = resolve_gamepad_button(self.config.gas_output_button)
         self.brake_output_btn = resolve_gamepad_button(self.config.brake_output_button)
+        self.gas_key_combo = resolve_keyboard_combo(self.config.gas_key)
+        self.brake_key_combo = resolve_keyboard_combo(self.config.brake_key)
         self.gear_up_btn = resolve_gamepad_button(self.config.gear_up_button)
         self.gear_down_btn = resolve_gamepad_button(self.config.gear_down_button)
         self.gear_up_keys = resolve_keyboard_combo(self.config.gear_up_key)
         self.gear_down_keys = resolve_keyboard_combo(self.config.gear_down_key)
+        self.hud_fullscreen_enabled = bool(self.config.fullscreen_mode)
+        if self.hud_fullscreen_enabled:
+            mx, my = self.mouse_controller.position
+            rect = get_monitor_rect_from_point(int(mx), int(my))
+            self.hud_fullscreen_rect = rect if rect[2] > 0 and rect[3] > 0 else None
+        else:
+            self.hud_fullscreen_rect = None
         if save_to_file:
             save_default_config(self.config)
         self.state.last_error = "设置已应用"
@@ -1309,6 +1346,7 @@ class MouseToVirtualGamepad:
         self.state.brake_active = False
         self.state.rt = 0.0
         self.state.lt = 0.0
+        self._update_keyboard_pedal_state(False, False)
         self._update_keyboard_shift_state(False, False)
         self.push_to_gamepad()
 
@@ -1517,10 +1555,27 @@ class MouseToVirtualGamepad:
             self.pad.right_joystick(x_value=rx, y_value=ry)
             self.pad.right_trigger(value=rt)
             self.pad.left_trigger(value=lt)
-            if self.gas_output_btn is not None:
-                self.pad.press_button(button=self.gas_output_btn) if self.state.gas_active else self.pad.release_button(button=self.gas_output_btn)
-            if self.brake_output_btn is not None:
-                self.pad.press_button(button=self.brake_output_btn) if self.state.brake_active else self.pad.release_button(button=self.brake_output_btn)
+        if self.config.gas_brake_mapping_mode == "keyboard":
+            self._update_keyboard_pedal_state(self.state.gas_active, self.state.brake_active)
+            if self.pad is not None:
+                if self.gas_output_btn is not None:
+                    self.pad.release_button(button=self.gas_output_btn)
+                if self.brake_output_btn is not None:
+                    self.pad.release_button(button=self.brake_output_btn)
+        elif self.config.gas_brake_mapping_mode == "none":
+            self._update_keyboard_pedal_state(False, False)
+            if self.pad is not None:
+                if self.gas_output_btn is not None:
+                    self.pad.release_button(button=self.gas_output_btn)
+                if self.brake_output_btn is not None:
+                    self.pad.release_button(button=self.brake_output_btn)
+        else:
+            self._update_keyboard_pedal_state(False, False)
+            if self.pad is not None:
+                if self.gas_output_btn is not None:
+                    self.pad.press_button(button=self.gas_output_btn) if self.state.gas_active else self.pad.release_button(button=self.gas_output_btn)
+                if self.brake_output_btn is not None:
+                    self.pad.press_button(button=self.brake_output_btn) if self.state.brake_active else self.pad.release_button(button=self.brake_output_btn)
         if self.config.gear_mapping_mode == "keyboard":
             if self.pad is not None:
                 if self.gear_up_btn is not None:
@@ -1571,6 +1626,33 @@ class MouseToVirtualGamepad:
         except Exception:
             self.gear_up_key_down = False
             self.gear_down_key_down = False
+
+    def _update_keyboard_pedal_state(self, gas_pressed: bool, brake_pressed: bool) -> None:
+        try:
+            if not self.gas_key_combo:
+                gas_pressed = False
+            if not self.brake_key_combo:
+                brake_pressed = False
+            if gas_pressed and not self.gas_key_down:
+                for k in self.gas_key_combo:
+                    self.keyboard_controller.press(k)
+                self.gas_key_down = True
+            elif not gas_pressed and self.gas_key_down:
+                for k in reversed(self.gas_key_combo):
+                    self.keyboard_controller.release(k)
+                self.gas_key_down = False
+
+            if brake_pressed and not self.brake_key_down:
+                for k in self.brake_key_combo:
+                    self.keyboard_controller.press(k)
+                self.brake_key_down = True
+            elif not brake_pressed and self.brake_key_down:
+                for k in reversed(self.brake_key_combo):
+                    self.keyboard_controller.release(k)
+                self.brake_key_down = False
+        except Exception:
+            self.gas_key_down = False
+            self.brake_key_down = False
 
     def worker_loop(self) -> None:
         kb_listener = keyboard.Listener(on_press=self.on_key_press, on_release=self.on_key_release)

@@ -19,6 +19,10 @@
       <div class="middle-scroll" id="middle-scroll">
         <section id="page-display" class="page">
           <div class="row">
+            <label id="lbl-fullscreen_mode" class="lbl">全屏模式</label>
+            <input id="fullscreen_mode" type="checkbox" />
+          </div>
+          <div class="row">
             <label id="lbl-window_scale" class="lbl">小窗缩放 (0.8 - 1.5)</label>
             <input id="window_scale" class="inp" />
           </div>
@@ -81,29 +85,6 @@
           <input id="open_settings_hotkey" class="inp-hotkey hotkey" readonly />
           <button id="reset-open_settings_hotkey" class="icon-btn" title="重置" type="button">↺</button>
         </div>
-
-          <div class="subttl">映射</div>
-          <div class="row">
-            <label id="lbl-control_mode" class="lbl">方向控制模式</label>
-            <select id="control_mode" class="sel">
-              <option value="1">模式1 方向+线性油刹</option>
-              <option value="2">模式2 方向+按键油刹</option>
-              <option value="3">模式3 仅线性油刹</option>
-              <option value="4">模式4 仅按键油刹</option>
-            </select>
-          </div>
-          <div class="row">
-            <label id="lbl-steering_axis" class="lbl">转向映射轴</label>
-            <select id="steering_axis" class="sel">
-              <option value="left_x">left_x</option>
-              <option value="left_y">left_y</option>
-              <option value="right_x">right_x</option>
-              <option value="right_y">right_y</option>
-            </select>
-            <button id="reset-steering_axis" class="icon-btn" title="重置" type="button">↺</button>
-            <button id="clear-steering_axis" class="icon-btn danger" title="取消绑定" type="button">✕</button>
-          </div>
-          <div class="subttl">油刹控制</div>
           <div class="row">
             <label id="lbl-gas_mouse_button" class="lbl">油门控制</label>
             <select id="gas_mouse_button" class="sel">
@@ -134,6 +115,39 @@
             <button id="reset-brake_mouse_button" class="icon-btn" title="重置" type="button">↺</button>
             <button id="clear-brake_mouse_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
           </div>
+
+          <div class="subttl">映射</div>
+          <div class="row">
+            <label id="lbl-control_mode" class="lbl">方向控制模式</label>
+            <select id="control_mode" class="sel">
+              <option value="1">模式1 方向+线性油刹</option>
+              <option value="2">模式2 方向+按键油刹</option>
+              <option value="3">模式3 仅线性油刹</option>
+              <option value="4">模式4 仅按键油刹</option>
+            </select>
+          </div>
+          <div class="row">
+            <label id="lbl-steering_axis" class="lbl">转向映射轴</label>
+            <select id="steering_axis" class="sel">
+              <option value="left_x">left_x</option>
+              <option value="left_y">left_y</option>
+              <option value="right_x">right_x</option>
+              <option value="right_y">right_y</option>
+            </select>
+            <button id="reset-steering_axis" class="icon-btn" title="重置" type="button">↺</button>
+            <button id="clear-steering_axis" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+          </div>
+          <div class="subttl">油刹映射</div>
+          <div class="row">
+            <label id="lbl-gas_brake_mapping_mode" class="lbl">油刹映射模式</label>
+            <select id="gas_brake_mapping_mode" class="sel">
+              <option value="gamepad">手柄映射</option>
+              <option value="keyboard">键盘映射</option>
+            </select>
+            <button id="reset-gas_brake_mapping_mode" class="icon-btn" title="重置" type="button">↺</button>
+            <button id="clear-gas_brake_mapping_mode" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+          </div>
+          <div id="pedal-gamepad-group">
           <div class="row">
             <label id="lbl-gas_output_button" class="lbl">油门映射（手柄）</label>
             <select id="gas_output_button" class="sel">
@@ -179,6 +193,21 @@
             </select>
             <button id="reset-brake_output_button" class="icon-btn" title="重置" type="button">↺</button>
             <button id="clear-brake_output_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+          </div>
+          </div>
+          <div id="pedal-keyboard-group" class="hidden">
+            <div class="row">
+              <label id="lbl-gas_key" class="lbl">油门（键盘）</label>
+              <input id="gas_key" class="inp-hotkey hotkey" readonly />
+              <button id="reset-gas_key" class="icon-btn" title="重置" type="button">↺</button>
+              <button id="clear-gas_key" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+            </div>
+            <div class="row">
+              <label id="lbl-brake_key" class="lbl">刹车（键盘）</label>
+              <input id="brake_key" class="inp-hotkey hotkey" readonly />
+              <button id="reset-brake_key" class="icon-btn" title="重置" type="button">↺</button>
+              <button id="clear-brake_key" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+            </div>
           </div>
           <div class="subttl">升降档控制</div>
           <div class="row">

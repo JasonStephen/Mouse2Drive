@@ -11,6 +11,7 @@ const pages = {
 };
 
 const inputs = {
+  fullscreen_mode: document.getElementById("fullscreen_mode"),
   window_scale: document.getElementById("window_scale"),
   fullscreen_scale: document.getElementById("fullscreen_scale"),
   hud_fps: document.getElementById("hud_fps"),
@@ -27,6 +28,9 @@ const inputs = {
   brake_mouse_button: document.getElementById("brake_mouse_button"),
   gas_output_button: document.getElementById("gas_output_button"),
   brake_output_button: document.getElementById("brake_output_button"),
+  gas_brake_mapping_mode: document.getElementById("gas_brake_mapping_mode"),
+  gas_key: document.getElementById("gas_key"),
+  brake_key: document.getElementById("brake_key"),
   gear_mapping_mode: document.getElementById("gear_mapping_mode"),
   gear_up_button: document.getElementById("gear_up_button"),
   gear_down_button: document.getElementById("gear_down_button"),
@@ -38,6 +42,7 @@ const detailMap = {
   display: "图像显示设置提示。",
   sense: "灵敏度设置提示。",
   bind: "快捷键与映射设置提示。",
+  fullscreen_mode: "切换 HUD 全屏或窗口模式。",
   window_scale: "小窗显示缩放比例。",
   fullscreen_scale: "全屏显示缩放比例。",
   hud_fps: "HUD 刷新帧率档位。",
@@ -54,6 +59,9 @@ const detailMap = {
   brake_mouse_button: "刹车触发按键。",
   gas_output_button: "油门映射到手柄按键。",
   brake_output_button: "刹车映射到手柄按键。",
+  gas_brake_mapping_mode: "油刹输出到手柄或键盘。",
+  gas_key: "油门键盘按键映射。",
+  brake_key: "刹车键盘按键映射。",
   gear_mapping_mode: "升降档输出到手柄或键盘。",
   gear_up_button: "升档对应的手柄按键。",
   gear_down_button: "降档对应的手柄按键。",
@@ -63,6 +71,7 @@ const detailMap = {
 
 const DEFAULTS = {
   hud_fps: 60,
+  fullscreen_mode: false,
   window_scale: 1.0,
   fullscreen_scale: 1.0,
   min_output_x: 0.235,
@@ -78,6 +87,9 @@ const DEFAULTS = {
   brake_mouse_button: "left",
   gas_output_button: "right_shoulder",
   brake_output_button: "left_shoulder",
+  gas_brake_mapping_mode: "gamepad",
+  gas_key: "w",
+  brake_key: "s",
   gear_mapping_mode: "gamepad",
   gear_up_button: "right_thumb",
   gear_down_button: "left_thumb",
@@ -101,6 +113,14 @@ function applyGearModeVisibility() {
   document.getElementById("gear-keyboard-group").classList.toggle("hidden", !isKeyboard);
 }
 
+function applyPedalModeVisibility() {
+  const mode = inputs.gas_brake_mapping_mode.value;
+  const isKeyboard = mode === "keyboard";
+  const isGamepad = mode === "gamepad";
+  document.getElementById("pedal-gamepad-group").classList.toggle("hidden", !isGamepad);
+  document.getElementById("pedal-keyboard-group").classList.toggle("hidden", !isKeyboard);
+}
+
 function showPage(kind) {
   tabs.display.classList.toggle("active", kind === "display");
   tabs.sense.classList.toggle("active", kind === "sense");
@@ -114,6 +134,7 @@ function showPage(kind) {
 function parseValues() {
   return {
     hud_fps: parseInt(inputs.hud_fps.value || "60", 10),
+    fullscreen_mode: !!inputs.fullscreen_mode.checked,
     window_scale: clamp(parseFloat(inputs.window_scale.value || "1"), 0.8, 1.5),
     fullscreen_scale: clamp(parseFloat(inputs.fullscreen_scale.value || "1"), 0.8, 1.5),
     min_output_x: clamp(parseFloat(inputs.min_output_x.value || "0.235"), 0.0, 1.0),
@@ -129,9 +150,12 @@ function parseValues() {
     brake_mouse_button: (inputs.brake_mouse_button.value || "left").trim(),
     gas_output_button: (inputs.gas_output_button.value || "right_shoulder").trim(),
     brake_output_button: (inputs.brake_output_button.value || "left_shoulder").trim(),
+    gas_brake_mapping_mode: (inputs.gas_brake_mapping_mode.value || "gamepad").trim(),
+    gas_key: (inputs.gas_key.value || "w").trim(),
+    brake_key: (inputs.brake_key.value || "s").trim(),
     gear_mapping_mode: (inputs.gear_mapping_mode.value || "gamepad").trim(),
-    gear_up_button: (inputs.gear_up_button.value || "none").trim(),
-    gear_down_button: (inputs.gear_down_button.value || "none").trim(),
+    gear_up_button: (inputs.gear_up_button.value || "right_thumb").trim(),
+    gear_down_button: (inputs.gear_down_button.value || "left_thumb").trim(),
     gear_up_key: (inputs.gear_up_key.value || "e").trim(),
     gear_down_key: (inputs.gear_down_key.value || "q").trim(),
   };
@@ -139,6 +163,7 @@ function parseValues() {
 
 function setValues(v) {
   inputs.hud_fps.value = String(v.hud_fps ?? 60);
+  inputs.fullscreen_mode.checked = !!(v.fullscreen_mode ?? false);
   inputs.window_scale.value = Number(v.window_scale).toFixed(2);
   inputs.fullscreen_scale.value = Number(v.fullscreen_scale).toFixed(2);
   inputs.min_output_x.value = Number(v.min_output_x).toFixed(3);
@@ -154,12 +179,16 @@ function setValues(v) {
   inputs.brake_mouse_button.value = String(v.brake_mouse_button ?? "left");
   inputs.gas_output_button.value = String(v.gas_output_button ?? "right_shoulder");
   inputs.brake_output_button.value = String(v.brake_output_button ?? "left_shoulder");
+  inputs.gas_brake_mapping_mode.value = String(v.gas_brake_mapping_mode ?? "gamepad");
+  inputs.gas_key.value = String(v.gas_key ?? "w");
+  inputs.brake_key.value = String(v.brake_key ?? "s");
   inputs.gear_mapping_mode.value = String(v.gear_mapping_mode ?? "gamepad");
-  inputs.gear_up_button.value = String(v.gear_up_button ?? "none");
-  inputs.gear_down_button.value = String(v.gear_down_button ?? "none");
+  inputs.gear_up_button.value = String(v.gear_up_button ?? "right_thumb");
+  inputs.gear_down_button.value = String(v.gear_down_button ?? "left_thumb");
   inputs.gear_up_key.value = String(v.gear_up_key ?? "e");
   inputs.gear_down_key.value = String(v.gear_down_key ?? "q");
   applyGearModeVisibility();
+  applyPedalModeVisibility();
 }
 
 function hasChanges() {
@@ -278,6 +307,7 @@ function setField(field, value) {
   if (!inputs[field]) return;
   inputs[field].value = value;
   if (field === "gear_mapping_mode") applyGearModeVisibility();
+  if (field === "gas_brake_mapping_mode") applyPedalModeVisibility();
 }
 
 function wireIconActions() {
@@ -285,7 +315,7 @@ function wireIconActions() {
   document.getElementById("btn-reset-gear-pulse").addEventListener("click", () => setField("gear_pulse_ms", "45"));
   document.getElementById("btn-reset-hide-cursor").addEventListener("click", () => setField("hide_cursor_on_enable", "true"));
 
-  ["toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gas_output_button", "brake_output_button", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
+  ["toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
     const r = document.getElementById(`reset-${k}`);
     if (r) r.addEventListener("click", () => setField(k, String(DEFAULTS[k])));
     const c = document.getElementById(`clear-${k}`);
@@ -297,6 +327,7 @@ tabs.display.addEventListener("click", () => showPage("display"));
 tabs.sense.addEventListener("click", () => showPage("sense"));
 tabs.bind.addEventListener("click", () => showPage("bind"));
 inputs.gear_mapping_mode.addEventListener("change", applyGearModeVisibility);
+inputs.gas_brake_mapping_mode.addEventListener("change", applyPedalModeVisibility);
 document.getElementById("btn-apply").addEventListener("click", () => apply(false));
 document.getElementById("btn-confirm").addEventListener("click", () => apply(true));
 document.getElementById("btn-close").addEventListener("click", () => closePanel());
@@ -308,7 +339,7 @@ document.getElementById("btn-reset-all").addEventListener("click", () => {
 for (const key of Object.keys(inputs)) {
   if (inputs[key]) bindHoverDetail(inputs[key], key);
 }
-["window_scale", "fullscreen_scale", "hud_fps", "min_output_x", "gear_pulse_ms", "hide_cursor_on_enable", "control_mode", "steering_axis", "toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "gas_mouse_button", "brake_mouse_button", "gas_output_button", "brake_output_button", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
+["fullscreen_mode", "window_scale", "fullscreen_scale", "hud_fps", "min_output_x", "gear_pulse_ms", "hide_cursor_on_enable", "control_mode", "steering_axis", "toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "gas_mouse_button", "brake_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
   const lbl = document.getElementById(`lbl-${k}`);
   if (lbl) bindHoverDetail(lbl, k);
 });
@@ -326,6 +357,8 @@ bindHotkeyCapture(inputs.toggle_hotkey);
 bindHotkeyCapture(inputs.switch_mode_hotkey);
 bindHotkeyCapture(inputs.toggle_fullscreen_hotkey);
 bindHotkeyCapture(inputs.open_settings_hotkey);
+bindHotkeyCapture(inputs.gas_key);
+bindHotkeyCapture(inputs.brake_key);
 bindHotkeyCapture(inputs.gear_up_key);
 bindHotkeyCapture(inputs.gear_down_key);
 
@@ -337,4 +370,3 @@ window.addEventListener("pywebviewready", async () => {
   setValues(init);
   showPage("display");
 });
-
