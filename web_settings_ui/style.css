@@ -22,10 +22,10 @@ html, body {
 
 .layout {
   height: 100%;
-  min-width: 720px;
+  min-width: 900px;
   padding: 10px;
   display: grid;
-  grid-template-columns: 96px 1fr 230px;
+  grid-template-columns: 140px 1fr 240px;
   gap: 10px;
   overflow: hidden;
 }
@@ -74,7 +74,7 @@ html, body {
 .subttl { color: var(--muted); margin: 6px 0 4px; white-space: nowrap; font-weight: 600; }
 
 .lbl {
-  width: 165px;
+  width: 210px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

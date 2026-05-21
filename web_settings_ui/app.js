@@ -1,4 +1,4 @@
-﻿const I18N = (typeof window.__I18N__ === "object" && window.__I18N__) ? window.__I18N__ : {};
+﻿let I18N = (typeof window.__I18N__ === "object" && window.__I18N__) ? window.__I18N__ : {};
 const OPTIONS = (typeof window.__SETTINGS_OPTIONS__ === "object" && window.__SETTINGS_OPTIONS__) ? window.__SETTINGS_OPTIONS__ : {};
 const FALLBACK_DEFAULTS = {
   language: "zh-CN",
@@ -92,21 +92,24 @@ const inputs = {
   gear_down_key: document.getElementById("gear_down_key"),
 };
 
-const detailMap = {
-  language: t("settings.detail.language", ""),
-  mode: t("settings.detail.control_mode", ""),
-  display: t("settings.detail.display", ""),
-  sense: t("settings.detail.sense", ""),
-  bind: t("settings.detail.bind", ""),
-};
-[
-  "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","fullscreen_mode","window_scale",
-  "fullscreen_scale","fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x",
-  "gear_pulse_ms","hide_cursor_on_enable","steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey",
-  "open_settings_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button",
-  "gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode",
-  "gear_up_button","gear_down_button","gear_up_key","gear_down_key"
-].forEach((k) => { detailMap[k] = t(`settings.detail.${k}`, ""); });
+let detailMap = {};
+function rebuildDetailMap() {
+  detailMap = {
+    language: t("settings.detail.language", ""),
+    mode: t("settings.detail.control_mode", ""),
+    display: t("settings.detail.display", ""),
+    sense: t("settings.detail.sense", ""),
+    bind: t("settings.detail.bind", ""),
+  };
+  [
+    "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","fullscreen_mode","window_scale",
+    "fullscreen_scale","fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x",
+    "gear_pulse_ms","hide_cursor_on_enable","steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey",
+    "open_settings_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button",
+    "gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode",
+    "gear_up_button","gear_down_button","gear_up_key","gear_down_key"
+  ].forEach((k) => { detailMap[k] = t(`settings.detail.${k}`, ""); });
+}
 
 let initialValues = null;
 let dragState = null;
@@ -232,6 +235,14 @@ function showPage(kind) {
   Object.keys(tabs).forEach((k) => tabs[k].classList.toggle("active", k === kind));
   Object.keys(pages).forEach((k) => pages[k].classList.toggle("hidden", k !== kind));
   detailEl.textContent = detailMap[kind] || "";
+}
+
+function getCurrentPageKind() {
+  if (tabs.language.classList.contains("active")) return "language";
+  if (tabs.mode.classList.contains("active")) return "mode";
+  if (tabs.display.classList.contains("active")) return "display";
+  if (tabs.sense.classList.contains("active")) return "sense";
+  return "bind";
 }
 
 function applyGearModeVisibility() {
@@ -367,12 +378,33 @@ function validateHotkeyConflicts(showAlert = false) {
 
 async function apply(closeAfter) {
   if (!validateHotkeyConflicts(true)) return;
+  const langBefore = String((initialValues && initialValues.language) ? initialValues.language : (inputs.language.value || "zh-CN"));
   const v = parseValues();
   setValues(v);
   await Promise.race([
     window.pywebview.api.apply(v, closeAfter),
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500)),
   ]);
+  if (!closeAfter && String(v.language || "zh-CN") !== langBefore) {
+    try {
+      const newI18n = await Promise.race([
+        window.pywebview.api.get_i18n(v.language),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1200)),
+      ]);
+      if (newI18n && typeof newI18n === "object") {
+        I18N = newI18n;
+        document.title = t("settings.title", "Settings");
+        const snapshot = parseValues();
+        rebuildDetailMap();
+        applyTextI18n();
+        applyOptionsFromConfig();
+        setValues(snapshot);
+        showPage(getCurrentPageKind());
+      }
+    } catch (_) {
+      // no-op
+    }
+  }
   initialValues = parseValues();
 }
 
@@ -583,6 +615,7 @@ let __initStarted = false;
 async function initSettingsUI() {
   if (__initStarted) return;
   __initStarted = true;
+  rebuildDetailMap();
   applyTextI18n();
   applyOptionsFromConfig();
 

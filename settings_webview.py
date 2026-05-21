@@ -27,9 +27,20 @@ class Api:
         with open(self.ipc_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         self.state = values
+        lang = str(values.get("language", "zh-CN"))
+        i18n = load_i18n(lang)
+        if self._window is not None:
+            try:
+                self._window.title = i18n.get("settings.title", "Settings")
+            except Exception:
+                pass
         if close_after:
             self._close_deferred()
         return True
+
+    def get_i18n(self, language=None):
+        lang = str(language or self.state.get("language", "zh-CN"))
+        return load_i18n(lang)
 
     def close_window(self):
         self._close_deferred()
@@ -65,7 +76,7 @@ def main():
     )
     bootstrap_path.write_text(bootstrap_text, encoding="utf-8")
     window_title = i18n.get("settings.title", "Settings")
-    window = webview.create_window(window_title, ui_path.as_uri(), js_api=api, width=760, height=420, min_size=(720, 420), resizable=True)
+    window = webview.create_window(window_title, ui_path.as_uri(), js_api=api, width=980, height=460, min_size=(900, 420), resizable=True)
     api.set_window(window)
     webview.start()
 
