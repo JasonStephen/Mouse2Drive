@@ -5,16 +5,19 @@ import threading
 from pathlib import Path
 
 import webview
+from gamepad_mouse_mapper import load_settings_defaults, load_settings_options
 
 
 class Api:
     def __init__(self, ipc_path: str, state: dict):
         self.ipc_path = ipc_path
         self.state = state
-        self.window = None
+        # Do not expose native window object as a public js_api attribute,
+        # otherwise pywebview may recurse deeply while introspecting js_api.
+        self._window = None
 
     def set_window(self, window):
-        self.window = window
+        self._window = window
 
     def get_initial(self):
         return self.state
@@ -33,10 +36,10 @@ class Api:
         return True
 
     def _close_deferred(self):
-        if self.window is None:
+        if self._window is None:
             return
         # Avoid destroying window directly inside sync API callback to reduce deadlock risk.
-        threading.Timer(0.05, self.window.destroy).start()
+        threading.Timer(0.05, self._window.destroy).start()
 
 
 def main():
@@ -50,7 +53,13 @@ def main():
     ui_dir = (Path(__file__).parent / "web_settings_ui").resolve()
     ui_path = (ui_dir / "index.html").resolve()
     bootstrap_path = ui_dir / "bootstrap_state.js"
-    bootstrap_text = "window.__BOOTSTRAP_STATE__ = " + json.dumps(state, ensure_ascii=False) + ";"
+    defaults = load_settings_defaults()
+    options = load_settings_options()
+    bootstrap_text = (
+        "window.__BOOTSTRAP_STATE__ = " + json.dumps(state, ensure_ascii=False) + ";\n"
+        "window.__SETTINGS_DEFAULTS__ = " + json.dumps(defaults, ensure_ascii=False) + ";\n"
+        "window.__SETTINGS_OPTIONS__ = " + json.dumps(options, ensure_ascii=False) + ";\n"
+    )
     bootstrap_path.write_text(bootstrap_text, encoding="utf-8")
     window = webview.create_window("设置", ui_path.as_uri(), js_api=api, width=760, height=420, min_size=(720, 420), resizable=True)
     api.set_window(window)

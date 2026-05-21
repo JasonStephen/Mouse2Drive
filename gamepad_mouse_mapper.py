@@ -17,6 +17,8 @@ from pynput import keyboard, mouse
 
 
 CONFIG_PATH = Path(__file__).with_name("config.cfg")
+SETTINGS_DEFAULTS_PATH = Path(__file__).with_name("settings_defaults.cfg")
+SETTINGS_OPTIONS_PATH = Path(__file__).with_name("settings_options.cfg")
 POLL_INTERVAL = 0.01
 HUD_FPS_OPTIONS = (15, 30, 60, 90, 120)
 
@@ -344,6 +346,8 @@ def get_monitor_rect_from_point(x: int, y: int) -> tuple[int, int, int, int]:
 
 def load_config() -> AppConfig:
     cfg = AppConfig()
+    defaults = load_settings_defaults()
+    apply_defaults_to_config(cfg, defaults)
     parser = configparser.ConfigParser()
 
     if not CONFIG_PATH.exists():
@@ -400,8 +404,9 @@ def load_config() -> AppConfig:
     if not (0.01 <= cfg.reference_range_y_ratio <= 1.0):
         cfg.reference_range_y_ratio = clamp(cfg.reference_range_y_px / 1080.0, 0.01, 1.0)
     cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 1.0)
-    if cfg.hud_fps not in HUD_FPS_OPTIONS:
-        cfg.hud_fps = 60
+    hud_fps_options = tuple(int(x) for x in load_settings_options().get("hud_fps", list(HUD_FPS_OPTIONS)))
+    if cfg.hud_fps not in hud_fps_options:
+        cfg.hud_fps = int(defaults.get("hud_fps", 60))
     cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
     if cfg.gear_mapping_mode not in {"gamepad", "keyboard", "none"}:
         cfg.gear_mapping_mode = "gamepad"
@@ -464,6 +469,147 @@ def save_default_config(cfg: AppConfig) -> None:
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
+
+
+def _split_pipe_list(text: str) -> list[str]:
+    return [x.strip() for x in str(text).split("|") if x.strip()]
+
+
+def _to_bool(v: str, fallback: bool) -> bool:
+    t = str(v).strip().lower()
+    if t in {"1", "true", "yes", "on"}:
+        return True
+    if t in {"0", "false", "no", "off"}:
+        return False
+    return fallback
+
+
+def load_settings_options() -> dict:
+    parser = configparser.ConfigParser()
+    defaults = {
+        "hud_fps": [15, 30, 60, 90, 120],
+        "boolean_switch": ["true", "false"],
+        "mouse_buttons": ["right", "left", "middle", "x1", "x2", "wheel_up", "wheel_down", "none"],
+        "gamepad_bindings": list(ALL_GAMEPAD_BINDING_NAMES),
+        "mapping_modes": ["gamepad", "keyboard"],
+        "control_modes": ["1", "2", "3", "4"],
+        "steering_axes": ["left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"],
+    }
+    try:
+        if SETTINGS_OPTIONS_PATH.exists():
+            parser.read(SETTINGS_OPTIONS_PATH, encoding="utf-8-sig")
+            sec = "options"
+            if parser.has_section(sec):
+                raw_hud = _split_pipe_list(parser.get(sec, "hud_fps", fallback=""))
+                if raw_hud:
+                    defaults["hud_fps"] = [int(x) for x in raw_hud if x.isdigit()]
+                for key in ("boolean_switch", "mouse_buttons", "gamepad_bindings", "mapping_modes", "control_modes", "steering_axes"):
+                    raw = _split_pipe_list(parser.get(sec, key, fallback=""))
+                    if raw:
+                        defaults[key] = raw
+    except Exception:
+        pass
+    return defaults
+
+
+def load_settings_defaults() -> dict:
+    parser = configparser.ConfigParser()
+    result = {
+        "hud_fps": 60,
+        "fullscreen_mode": False,
+        "window_scale": 1.0,
+        "fullscreen_scale": 1.0,
+        "min_output_x": 0.235,
+        "gear_pulse_ms": 45,
+        "hide_cursor_on_enable": True,
+        "control_mode": 1,
+        "steering_axis": "left_x",
+        "toggle_hotkey": "shift+v",
+        "switch_mode_hotkey": "alt+shift+v",
+        "toggle_fullscreen_hotkey": "alt+f",
+        "open_settings_hotkey": "ctrl+shift+o",
+        "gas_mouse_button": "right",
+        "brake_mouse_button": "left",
+        "gear_up_mouse_button": "wheel_up",
+        "gear_down_mouse_button": "wheel_down",
+        "gas_output_button": "right_trigger",
+        "brake_output_button": "left_trigger",
+        "gas_brake_mapping_mode": "gamepad",
+        "gas_key": "w",
+        "brake_key": "s",
+        "gear_mapping_mode": "gamepad",
+        "gear_up_button": "right_thumb",
+        "gear_down_button": "left_thumb",
+        "gear_up_key": "e",
+        "gear_down_key": "q",
+        "debug_mode": False,
+        "reference_range_x_px": 360.0,
+        "reference_range_y_px": 260.0,
+        "reference_range_x_ratio": 0.1875,
+        "reference_range_y_ratio": 0.2407,
+        "fullscreen_alpha": 0.0,
+    }
+    try:
+        if SETTINGS_DEFAULTS_PATH.exists():
+            parser.read(SETTINGS_DEFAULTS_PATH, encoding="utf-8-sig")
+            sec = "defaults"
+            if parser.has_section(sec):
+                for k in ("toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"):
+                    result[k] = parser.get(sec, k, fallback=str(result[k]))
+                for k in ("hud_fps", "gear_pulse_ms", "control_mode"):
+                    result[k] = parser.getint(sec, k, fallback=int(result[k]))
+                for k in ("window_scale", "fullscreen_scale", "min_output_x", "reference_range_x_px", "reference_range_y_px", "reference_range_x_ratio", "reference_range_y_ratio", "fullscreen_alpha"):
+                    result[k] = parser.getfloat(sec, k, fallback=float(result[k]))
+                result["fullscreen_mode"] = _to_bool(parser.get(sec, "fullscreen_mode", fallback=str(result["fullscreen_mode"])), bool(result["fullscreen_mode"]))
+                result["hide_cursor_on_enable"] = _to_bool(parser.get(sec, "hide_cursor_on_enable", fallback=str(result["hide_cursor_on_enable"])), bool(result["hide_cursor_on_enable"]))
+                result["debug_mode"] = _to_bool(parser.get(sec, "debug_mode", fallback=str(result["debug_mode"])), bool(result["debug_mode"]))
+    except Exception:
+        pass
+    return result
+
+
+def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
+    cfg.hud_fps = int(defaults.get("hud_fps", cfg.hud_fps))
+    cfg.fullscreen_mode = bool(defaults.get("fullscreen_mode", cfg.fullscreen_mode))
+    cfg.windows_scale = float(defaults.get("window_scale", cfg.windows_scale))
+    cfg.fullscreen_scale = float(defaults.get("fullscreen_scale", cfg.fullscreen_scale))
+    cfg.min_output_x = float(defaults.get("min_output_x", cfg.min_output_x))
+    cfg.gear_pulse_ms = int(defaults.get("gear_pulse_ms", cfg.gear_pulse_ms))
+    cfg.hide_cursor_on_enable = bool(defaults.get("hide_cursor_on_enable", cfg.hide_cursor_on_enable))
+    cfg.control_mode = int(defaults.get("control_mode", cfg.control_mode))
+    cfg.steering_axis = str(defaults.get("steering_axis", cfg.steering_axis))
+    cfg.toggle_hotkey = str(defaults.get("toggle_hotkey", cfg.toggle_hotkey))
+    cfg.switch_mode_hotkey = str(defaults.get("switch_mode_hotkey", cfg.switch_mode_hotkey))
+    cfg.toggle_fullscreen_hotkey = str(defaults.get("toggle_fullscreen_hotkey", cfg.toggle_fullscreen_hotkey))
+    cfg.open_settings_hotkey = str(defaults.get("open_settings_hotkey", cfg.open_settings_hotkey))
+    cfg.gas_mouse_button = str(defaults.get("gas_mouse_button", cfg.gas_mouse_button))
+    cfg.brake_mouse_button = str(defaults.get("brake_mouse_button", cfg.brake_mouse_button))
+    cfg.gear_up_mouse_button = str(defaults.get("gear_up_mouse_button", cfg.gear_up_mouse_button))
+    cfg.gear_down_mouse_button = str(defaults.get("gear_down_mouse_button", cfg.gear_down_mouse_button))
+    cfg.gas_output_button = str(defaults.get("gas_output_button", cfg.gas_output_button))
+    cfg.brake_output_button = str(defaults.get("brake_output_button", cfg.brake_output_button))
+    cfg.gas_brake_mapping_mode = str(defaults.get("gas_brake_mapping_mode", cfg.gas_brake_mapping_mode))
+    cfg.gas_key = str(defaults.get("gas_key", cfg.gas_key))
+    cfg.brake_key = str(defaults.get("brake_key", cfg.brake_key))
+    cfg.gear_mapping_mode = str(defaults.get("gear_mapping_mode", cfg.gear_mapping_mode))
+    cfg.gear_up_button = str(defaults.get("gear_up_button", cfg.gear_up_button))
+    cfg.gear_down_button = str(defaults.get("gear_down_button", cfg.gear_down_button))
+    cfg.gear_up_key = str(defaults.get("gear_up_key", cfg.gear_up_key))
+    cfg.gear_down_key = str(defaults.get("gear_down_key", cfg.gear_down_key))
+    cfg.debug_mode = bool(defaults.get("debug_mode", cfg.debug_mode))
+    cfg.reference_range_x_px = float(defaults.get("reference_range_x_px", cfg.reference_range_x_px))
+    cfg.reference_range_y_px = float(defaults.get("reference_range_y_px", cfg.reference_range_y_px))
+    cfg.reference_range_x_ratio = float(defaults.get("reference_range_x_ratio", cfg.reference_range_x_ratio))
+    cfg.reference_range_y_ratio = float(defaults.get("reference_range_y_ratio", cfg.reference_range_y_ratio))
+    cfg.fullscreen_alpha = float(defaults.get("fullscreen_alpha", cfg.fullscreen_alpha))
+
+
+def current_hud_fps_options() -> tuple[int, ...]:
+    try:
+        vals = tuple(int(x) for x in load_settings_options().get("hud_fps", list(HUD_FPS_OPTIONS)))
+        return vals if vals else HUD_FPS_OPTIONS
+    except Exception:
+        return HUD_FPS_OPTIONS
 
 
 class Indicator:
@@ -907,13 +1053,10 @@ class Indicator:
                 except Exception:
                     pass
                 self.settings_webview_log_handle = None
-            self.settings_webview_log_handle = open(self.settings_debug_log_path, "a", encoding="utf-8")
             self._settings_debug_log("starting settings_webview subprocess")
             self.settings_webview_proc = subprocess.Popen(
                 [sys.executable, str(script_path), "--ipc", self.settings_ipc_path, "--state-file", self.settings_state_path],
                 cwd=str(Path(__file__).parent),
-                stdout=self.settings_webview_log_handle,
-                stderr=self.settings_webview_log_handle,
             )
             self.local_error_text = f"设置窗口启动中 pid={self.settings_webview_proc.pid}"
             if callable(self.settings_open_callback):
@@ -962,7 +1105,7 @@ class Indicator:
             requested_fps = int(values.get("hud_fps", self.hud_fps))
         except Exception:
             requested_fps = self.hud_fps
-        self.hud_fps = requested_fps if requested_fps in HUD_FPS_OPTIONS else 60
+        self.hud_fps = requested_fps if requested_fps in current_hud_fps_options() else 60
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
         self.window_scale = clamp(float(values["window_scale"]), 0.8, 1.5)
         self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 1.5)
@@ -996,6 +1139,13 @@ class Indicator:
 
     def _poll_settings_ipc(self) -> None:
         try:
+            if self.settings_webview_proc is not None:
+                rc = self.settings_webview_proc.poll()
+                if rc is not None:
+                    self._settings_debug_log(f"settings process exited rc={rc}")
+                    self.settings_webview_proc = None
+                    if callable(self.settings_open_callback):
+                        self.settings_open_callback(False)
             if os.path.exists(self.settings_ipc_path):
                 with open(self.settings_ipc_path, "r", encoding="utf-8") as f:
                     payload = json.load(f)
@@ -1214,6 +1364,7 @@ class MouseToVirtualGamepad:
         self.settings_panel_open = False
         self.open_settings_requested = False
         self.hud_fullscreen_enabled = bool(self.config.fullscreen_mode)
+        self._last_scroll_reason_log_ts = 0.0
 
         try:
             self.pad = vg.VX360Gamepad()
@@ -1232,6 +1383,9 @@ class MouseToVirtualGamepad:
             changed = True
         if changed:
             self.state.last_error = "检测到油刹映射与视角键冲突，已自动改为 RT/LT"
+
+    def _dbg(self, msg: str) -> None:
+        return
 
     def get_runtime_settings(self) -> dict:
         return {
@@ -1269,7 +1423,7 @@ class MouseToVirtualGamepad:
             hud_fps = int(values.get("hud_fps", self.config.hud_fps))
         except Exception:
             hud_fps = self.config.hud_fps
-        self.config.hud_fps = hud_fps if hud_fps in HUD_FPS_OPTIONS else 60
+        self.config.hud_fps = hud_fps if hud_fps in current_hud_fps_options() else 60
         try:
             control_mode = int(values.get("control_mode", self.config.control_mode))
         except Exception:
@@ -1525,11 +1679,13 @@ class MouseToVirtualGamepad:
             return
         now = time.time()
         pulse = self.config.gear_pulse_ms / 1000.0
-        if self.config.gear_mapping_mode == "gamepad":
+        if self.config.gear_mapping_mode != "none":
             if self.gear_up_mouse_btn is not None and button == self.gear_up_mouse_btn:
                 self.gear_up_until = max(self.gear_up_until, now + pulse)
+                self._dbg(f"mouse_click gear_up pulse set mode={self.config.gear_mapping_mode} button={self.config.gear_up_mouse_button} until={self.gear_up_until:.3f}")
             if self.gear_down_mouse_btn is not None and button == self.gear_down_mouse_btn:
                 self.gear_down_until = max(self.gear_down_until, now + pulse)
+                self._dbg(f"mouse_click gear_down pulse set mode={self.config.gear_mapping_mode} button={self.config.gear_down_mouse_button} until={self.gear_down_until:.3f}")
 
     def on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
         if not self.state.enabled:
@@ -1544,15 +1700,21 @@ class MouseToVirtualGamepad:
             self.brake_scroll_until = max(self.brake_scroll_until, now + pulse)
         if self.config.brake_mouse_button == "wheel_down" and dy < 0:
             self.brake_scroll_until = max(self.brake_scroll_until, now + pulse)
-        if self.config.gear_mapping_mode == "gamepad":
+        if self.config.gear_mapping_mode != "none":
             if self.config.gear_up_mouse_button == "wheel_up" and dy > 0:
                 self.gear_up_until = max(self.gear_up_until, now + pulse)
+                self._dbg(f"mouse_scroll gear_up pulse set mode={self.config.gear_mapping_mode} dy={dy} bind={self.config.gear_up_mouse_button} until={self.gear_up_until:.3f}")
             if self.config.gear_up_mouse_button == "wheel_down" and dy < 0:
                 self.gear_up_until = max(self.gear_up_until, now + pulse)
+                self._dbg(f"mouse_scroll gear_up pulse set mode={self.config.gear_mapping_mode} dy={dy} bind={self.config.gear_up_mouse_button} until={self.gear_up_until:.3f}")
             if self.config.gear_down_mouse_button == "wheel_up" and dy > 0:
                 self.gear_down_until = max(self.gear_down_until, now + pulse)
+                self._dbg(f"mouse_scroll gear_down pulse set mode={self.config.gear_mapping_mode} dy={dy} bind={self.config.gear_down_mouse_button} until={self.gear_down_until:.3f}")
             if self.config.gear_down_mouse_button == "wheel_down" and dy < 0:
                 self.gear_down_until = max(self.gear_down_until, now + pulse)
+                self._dbg(f"mouse_scroll gear_down pulse set mode={self.config.gear_mapping_mode} dy={dy} bind={self.config.gear_down_mouse_button} until={self.gear_down_until:.3f}")
+        else:
+            pass
 
     def compute_state(self) -> None:
         if self.reference_pos is None or self.current_pos is None:
@@ -1751,19 +1913,23 @@ class MouseToVirtualGamepad:
             if up_pressed and not self.gear_up_key_down:
                 for k in self.gear_up_keys:
                     self.keyboard_controller.press(k)
+                self._dbg(f"keyboard_press gear_up keys={self.config.gear_up_key} mode={self.config.gear_mapping_mode}")
                 self.gear_up_key_down = True
             elif not up_pressed and self.gear_up_key_down:
                 for k in reversed(self.gear_up_keys):
                     self.keyboard_controller.release(k)
+                self._dbg(f"keyboard_release gear_up keys={self.config.gear_up_key} mode={self.config.gear_mapping_mode}")
                 self.gear_up_key_down = False
 
             if down_pressed and not self.gear_down_key_down:
                 for k in self.gear_down_keys:
                     self.keyboard_controller.press(k)
+                self._dbg(f"keyboard_press gear_down keys={self.config.gear_down_key} mode={self.config.gear_mapping_mode}")
                 self.gear_down_key_down = True
             elif not down_pressed and self.gear_down_key_down:
                 for k in reversed(self.gear_down_keys):
                     self.keyboard_controller.release(k)
+                self._dbg(f"keyboard_release gear_down keys={self.config.gear_down_key} mode={self.config.gear_mapping_mode}")
                 self.gear_down_key_down = False
         except Exception:
             self.gear_up_key_down = False

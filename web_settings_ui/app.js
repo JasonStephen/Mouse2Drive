@@ -73,7 +73,7 @@ const detailMap = {
   gear_down_key: "降档键盘按键映射。",
 };
 
-const DEFAULTS = {
+const FALLBACK_DEFAULTS = {
   hud_fps: 60,
   fullscreen_mode: false,
   window_scale: 1.0,
@@ -102,20 +102,14 @@ const DEFAULTS = {
   gear_up_key: "e",
   gear_down_key: "q",
 };
+const DEFAULTS = (typeof window.__SETTINGS_DEFAULTS__ === "object" && window.__SETTINGS_DEFAULTS__) ? window.__SETTINGS_DEFAULTS__ : FALLBACK_DEFAULTS;
+const OPTIONS = (typeof window.__SETTINGS_OPTIONS__ === "object" && window.__SETTINGS_OPTIONS__) ? window.__SETTINGS_OPTIONS__ : {};
 
 let initialValues = null;
 let dragState = null;
 let hotkeyCaptureTarget = null;
 let hotkeyPressed = new Set();
 let hotkeyLastCombo = "";
-const GAMEPAD_BINDINGS = [
-  "right_shoulder", "left_shoulder", "left_thumb", "right_thumb",
-  "back", "start", "guide", "a", "b", "x", "y",
-  "dpad_up", "dpad_down", "dpad_left", "dpad_right",
-  "left_stick_left", "left_stick_right", "left_stick_up", "left_stick_down",
-  "right_stick_left", "right_stick_right", "right_stick_up", "right_stick_down",
-  "left_trigger", "right_trigger", "none",
-];
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
@@ -152,72 +146,112 @@ function fillSelect(selectEl, values) {
   if (values.includes(prev)) selectEl.value = prev;
 }
 
+function fillSelectWithLabels(selectEl, pairs) {
+  if (!selectEl) return;
+  const prev = selectEl.value;
+  selectEl.innerHTML = pairs.map((p) => `<option value="${p.value}">${p.label}</option>`).join("");
+  if (pairs.some((p) => p.value === prev)) selectEl.value = prev;
+}
+
+function applyOptionsFromConfig() {
+  fillSelect(inputs.hud_fps, (OPTIONS.hud_fps || [15, 30, 60, 90, 120]).map((x) => String(x)));
+  fillSelect(inputs.hide_cursor_on_enable, OPTIONS.boolean_switch || ["true", "false"]);
+  fillSelect(inputs.gas_mouse_button, OPTIONS.mouse_buttons || ["right", "left", "middle", "x1", "x2", "wheel_up", "wheel_down", "none"]);
+  fillSelect(inputs.brake_mouse_button, OPTIONS.mouse_buttons || ["right", "left", "middle", "x1", "x2", "wheel_up", "wheel_down", "none"]);
+  fillSelect(inputs.gear_up_mouse_button, OPTIONS.mouse_buttons || ["right", "left", "middle", "x1", "x2", "wheel_up", "wheel_down", "none"]);
+  fillSelect(inputs.gear_down_mouse_button, OPTIONS.mouse_buttons || ["right", "left", "middle", "x1", "x2", "wheel_up", "wheel_down", "none"]);
+  fillSelect(inputs.steering_axis, OPTIONS.steering_axes || ["left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"]);
+  const modeValues = OPTIONS.mapping_modes || ["gamepad", "keyboard"];
+  fillSelectWithLabels(inputs.gas_brake_mapping_mode, modeValues.map((v) => ({ value: v, label: v === "gamepad" ? "手柄映射" : "键盘映射" })));
+  fillSelectWithLabels(inputs.gear_mapping_mode, modeValues.map((v) => ({ value: v, label: v === "gamepad" ? "手柄映射" : "键盘映射" })));
+  fillSelect(inputs.gas_output_button, OPTIONS.gamepad_bindings || []);
+  fillSelect(inputs.brake_output_button, OPTIONS.gamepad_bindings || []);
+  fillSelect(inputs.gear_up_button, OPTIONS.gamepad_bindings || []);
+  fillSelect(inputs.gear_down_button, OPTIONS.gamepad_bindings || []);
+  const controlModes = OPTIONS.control_modes || ["1", "2", "3", "4"];
+  const controlLabels = {
+    "1": "模式1 方向+线性油刹",
+    "2": "模式2 方向+按键油刹",
+    "3": "模式3 仅线性油刹",
+    "4": "模式4 仅按键油刹",
+  };
+  fillSelectWithLabels(inputs.control_mode, controlModes.map((v) => ({ value: v, label: controlLabels[v] || `模式${v}` })));
+}
+
 function parseValues() {
   return {
-    hud_fps: parseInt(inputs.hud_fps.value || "60", 10),
+    hud_fps: parseInt(inputs.hud_fps.value || String(DEFAULTS.hud_fps), 10),
     fullscreen_mode: !!inputs.fullscreen_mode.checked,
-    window_scale: clamp(parseFloat(inputs.window_scale.value || "1"), 0.8, 1.5),
-    fullscreen_scale: clamp(parseFloat(inputs.fullscreen_scale.value || "1"), 0.8, 1.5),
-    min_output_x: clamp(parseFloat(inputs.min_output_x.value || "0.235"), 0.0, 1.0),
-    gear_pulse_ms: Math.round(clamp(parseFloat(inputs.gear_pulse_ms.value || "45"), 10, 300)),
+    window_scale: clamp(parseFloat(inputs.window_scale.value || String(DEFAULTS.window_scale)), 0.8, 1.5),
+    fullscreen_scale: clamp(parseFloat(inputs.fullscreen_scale.value || String(DEFAULTS.fullscreen_scale)), 0.8, 1.5),
+    min_output_x: clamp(parseFloat(inputs.min_output_x.value || String(DEFAULTS.min_output_x)), 0.0, 1.0),
+    gear_pulse_ms: Math.round(clamp(parseFloat(inputs.gear_pulse_ms.value || String(DEFAULTS.gear_pulse_ms)), 10, 300)),
     hide_cursor_on_enable: inputs.hide_cursor_on_enable.value === "true",
     control_mode: parseInt(inputs.control_mode.value || "1", 10),
-    steering_axis: (inputs.steering_axis.value || "left_x").trim(),
+    steering_axis: (inputs.steering_axis.value || String(DEFAULTS.steering_axis)).trim(),
     toggle_hotkey: (inputs.toggle_hotkey.value || "").trim(),
     switch_mode_hotkey: (inputs.switch_mode_hotkey.value || "").trim(),
     toggle_fullscreen_hotkey: (inputs.toggle_fullscreen_hotkey.value || "").trim(),
     open_settings_hotkey: (inputs.open_settings_hotkey.value || "").trim(),
-    gas_mouse_button: (inputs.gas_mouse_button.value || "right").trim(),
-    brake_mouse_button: (inputs.brake_mouse_button.value || "left").trim(),
-    gear_up_mouse_button: (inputs.gear_up_mouse_button.value || "wheel_up").trim(),
-    gear_down_mouse_button: (inputs.gear_down_mouse_button.value || "wheel_down").trim(),
-    gas_output_button: (inputs.gas_output_button.value || "right_trigger").trim(),
-    brake_output_button: (inputs.brake_output_button.value || "left_trigger").trim(),
-    gas_brake_mapping_mode: (inputs.gas_brake_mapping_mode.value || "gamepad").trim(),
-    gas_key: (inputs.gas_key.value || "w").trim(),
-    brake_key: (inputs.brake_key.value || "s").trim(),
-    gear_mapping_mode: (inputs.gear_mapping_mode.value || "gamepad").trim(),
-    gear_up_button: (inputs.gear_up_button.value || "right_thumb").trim(),
-    gear_down_button: (inputs.gear_down_button.value || "left_thumb").trim(),
-    gear_up_key: (inputs.gear_up_key.value || "e").trim(),
-    gear_down_key: (inputs.gear_down_key.value || "q").trim(),
+    gas_mouse_button: (inputs.gas_mouse_button.value || String(DEFAULTS.gas_mouse_button)).trim(),
+    brake_mouse_button: (inputs.brake_mouse_button.value || String(DEFAULTS.brake_mouse_button)).trim(),
+    gear_up_mouse_button: (inputs.gear_up_mouse_button.value || String(DEFAULTS.gear_up_mouse_button)).trim(),
+    gear_down_mouse_button: (inputs.gear_down_mouse_button.value || String(DEFAULTS.gear_down_mouse_button)).trim(),
+    gas_output_button: (inputs.gas_output_button.value || String(DEFAULTS.gas_output_button)).trim(),
+    brake_output_button: (inputs.brake_output_button.value || String(DEFAULTS.brake_output_button)).trim(),
+    gas_brake_mapping_mode: (inputs.gas_brake_mapping_mode.value || String(DEFAULTS.gas_brake_mapping_mode)).trim(),
+    gas_key: (inputs.gas_key.value || String(DEFAULTS.gas_key)).trim(),
+    brake_key: (inputs.brake_key.value || String(DEFAULTS.brake_key)).trim(),
+    gear_mapping_mode: (inputs.gear_mapping_mode.value || String(DEFAULTS.gear_mapping_mode)).trim(),
+    gear_up_button: (inputs.gear_up_button.value || String(DEFAULTS.gear_up_button)).trim(),
+    gear_down_button: (inputs.gear_down_button.value || String(DEFAULTS.gear_down_button)).trim(),
+    gear_up_key: (inputs.gear_up_key.value || String(DEFAULTS.gear_up_key)).trim(),
+    gear_down_key: (inputs.gear_down_key.value || String(DEFAULTS.gear_down_key)).trim(),
   };
 }
 
 function setValues(v) {
-  inputs.hud_fps.value = String(v.hud_fps ?? 60);
-  inputs.fullscreen_mode.checked = !!(v.fullscreen_mode ?? false);
-  inputs.window_scale.value = Number(v.window_scale).toFixed(2);
-  inputs.fullscreen_scale.value = Number(v.fullscreen_scale).toFixed(2);
-  inputs.min_output_x.value = Number(v.min_output_x).toFixed(3);
-  inputs.gear_pulse_ms.value = String(v.gear_pulse_ms ?? 45);
+  inputs.hud_fps.value = String(v.hud_fps ?? DEFAULTS.hud_fps);
+  inputs.fullscreen_mode.checked = !!(v.fullscreen_mode ?? DEFAULTS.fullscreen_mode);
+  inputs.window_scale.value = Number(v.window_scale ?? DEFAULTS.window_scale).toFixed(2);
+  inputs.fullscreen_scale.value = Number(v.fullscreen_scale ?? DEFAULTS.fullscreen_scale).toFixed(2);
+  inputs.min_output_x.value = Number(v.min_output_x ?? DEFAULTS.min_output_x).toFixed(3);
+  inputs.gear_pulse_ms.value = String(v.gear_pulse_ms ?? DEFAULTS.gear_pulse_ms);
   inputs.hide_cursor_on_enable.value = (v.hide_cursor_on_enable ? "true" : "false");
-  inputs.control_mode.value = String(v.control_mode ?? 1);
-  inputs.steering_axis.value = String(v.steering_axis ?? "left_x");
-  inputs.toggle_hotkey.value = String(v.toggle_hotkey ?? "shift+v");
-  inputs.switch_mode_hotkey.value = String(v.switch_mode_hotkey ?? "alt+shift+v");
-  inputs.toggle_fullscreen_hotkey.value = String(v.toggle_fullscreen_hotkey ?? "alt+f");
-  inputs.open_settings_hotkey.value = String(v.open_settings_hotkey ?? "ctrl+shift+o");
-  inputs.gas_mouse_button.value = String(v.gas_mouse_button ?? "right");
-  inputs.brake_mouse_button.value = String(v.brake_mouse_button ?? "left");
-  inputs.gear_up_mouse_button.value = String(v.gear_up_mouse_button ?? "wheel_up");
-  inputs.gear_down_mouse_button.value = String(v.gear_down_mouse_button ?? "wheel_down");
-  inputs.gas_output_button.value = String(v.gas_output_button ?? "right_trigger");
-  inputs.brake_output_button.value = String(v.brake_output_button ?? "left_trigger");
-  inputs.gas_brake_mapping_mode.value = String(v.gas_brake_mapping_mode ?? "gamepad");
-  inputs.gas_key.value = String(v.gas_key ?? "w");
-  inputs.brake_key.value = String(v.brake_key ?? "s");
-  inputs.gear_mapping_mode.value = String(v.gear_mapping_mode ?? "gamepad");
-  inputs.gear_up_button.value = String(v.gear_up_button ?? "right_thumb");
-  inputs.gear_down_button.value = String(v.gear_down_button ?? "left_thumb");
-  inputs.gear_up_key.value = String(v.gear_up_key ?? "e");
-  inputs.gear_down_key.value = String(v.gear_down_key ?? "q");
+  inputs.control_mode.value = String(v.control_mode ?? DEFAULTS.control_mode);
+  inputs.steering_axis.value = String(v.steering_axis ?? DEFAULTS.steering_axis);
+  inputs.toggle_hotkey.value = String(v.toggle_hotkey ?? DEFAULTS.toggle_hotkey);
+  inputs.switch_mode_hotkey.value = String(v.switch_mode_hotkey ?? DEFAULTS.switch_mode_hotkey);
+  inputs.toggle_fullscreen_hotkey.value = String(v.toggle_fullscreen_hotkey ?? DEFAULTS.toggle_fullscreen_hotkey);
+  inputs.open_settings_hotkey.value = String(v.open_settings_hotkey ?? DEFAULTS.open_settings_hotkey);
+  inputs.gas_mouse_button.value = String(v.gas_mouse_button ?? DEFAULTS.gas_mouse_button);
+  inputs.brake_mouse_button.value = String(v.brake_mouse_button ?? DEFAULTS.brake_mouse_button);
+  inputs.gear_up_mouse_button.value = String(v.gear_up_mouse_button ?? DEFAULTS.gear_up_mouse_button);
+  inputs.gear_down_mouse_button.value = String(v.gear_down_mouse_button ?? DEFAULTS.gear_down_mouse_button);
+  inputs.gas_output_button.value = String(v.gas_output_button ?? DEFAULTS.gas_output_button);
+  inputs.brake_output_button.value = String(v.brake_output_button ?? DEFAULTS.brake_output_button);
+  inputs.gas_brake_mapping_mode.value = String(v.gas_brake_mapping_mode ?? DEFAULTS.gas_brake_mapping_mode);
+  inputs.gas_key.value = String(v.gas_key ?? DEFAULTS.gas_key);
+  inputs.brake_key.value = String(v.brake_key ?? DEFAULTS.brake_key);
+  inputs.gear_mapping_mode.value = String(v.gear_mapping_mode ?? DEFAULTS.gear_mapping_mode);
+  inputs.gear_up_button.value = String(v.gear_up_button ?? DEFAULTS.gear_up_button);
+  inputs.gear_down_button.value = String(v.gear_down_button ?? DEFAULTS.gear_down_button);
+  inputs.gear_up_key.value = String(v.gear_up_key ?? DEFAULTS.gear_up_key);
+  inputs.gear_down_key.value = String(v.gear_down_key ?? DEFAULTS.gear_down_key);
   applyGearModeVisibility();
   applyPedalModeVisibility();
 }
 
 function hasChanges() {
-  return JSON.stringify(parseValues()) !== JSON.stringify(initialValues);
+  if (!initialValues) return false;
+  const now = parseValues();
+  const keys = Object.keys(now);
+  for (const k of keys) {
+    if (JSON.stringify(now[k]) !== JSON.stringify(initialValues[k])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getEffectiveHotkeyFields() {
@@ -277,7 +311,7 @@ async function apply(closeAfter) {
     window.pywebview.api.apply(v, closeAfter),
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500)),
   ]);
-  initialValues = v;
+  initialValues = parseValues();
 }
 
 async function closePanel() {
@@ -400,9 +434,9 @@ function setField(field, value) {
 }
 
 function wireIconActions() {
-  document.getElementById("btn-reset-min-output").addEventListener("click", () => setField("min_output_x", "0.235"));
-  document.getElementById("btn-reset-gear-pulse").addEventListener("click", () => setField("gear_pulse_ms", "45"));
-  document.getElementById("btn-reset-hide-cursor").addEventListener("click", () => setField("hide_cursor_on_enable", "true"));
+  document.getElementById("btn-reset-min-output").addEventListener("click", () => setField("min_output_x", String(DEFAULTS.min_output_x)));
+  document.getElementById("btn-reset-gear-pulse").addEventListener("click", () => setField("gear_pulse_ms", String(DEFAULTS.gear_pulse_ms)));
+  document.getElementById("btn-reset-hide-cursor").addEventListener("click", () => setField("hide_cursor_on_enable", String(DEFAULTS.hide_cursor_on_enable)));
 
   ["toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
     const r = document.getElementById(`reset-${k}`);
@@ -492,11 +526,11 @@ function tryReadBootstrapStateFromWindow() {
   }
 }
 
-window.addEventListener("pywebviewready", async () => {
-  fillSelect(inputs.gas_output_button, GAMEPAD_BINDINGS);
-  fillSelect(inputs.brake_output_button, GAMEPAD_BINDINGS);
-  fillSelect(inputs.gear_up_button, GAMEPAD_BINDINGS);
-  fillSelect(inputs.gear_down_button, GAMEPAD_BINDINGS);
+let __initStarted = false;
+async function initSettingsUI() {
+  if (__initStarted) return;
+  __initStarted = true;
+  applyOptionsFromConfig();
   let init = tryReadBootstrapStateFromWindow();
   if (!init) {
     try {
@@ -510,8 +544,17 @@ window.addEventListener("pywebviewready", async () => {
       alert("设置初始化读取超时，已使用默认值。可关闭后重开设置面板。");
     }
   }
-  initialValues = init;
   setValues(init);
+  initialValues = parseValues();
   validateHotkeyConflicts(false);
   showPage("display");
+}
+
+window.addEventListener("pywebviewready", () => {
+  initSettingsUI();
+});
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    initSettingsUI();
+  }, 50);
 });
