@@ -10,14 +10,30 @@
   <div class="layout">
     <aside class="left card">
       <div class="title">设置类型</div>
-      <button id="tab-display" class="tab active" type="button">图像显示</button>
+      <button id="tab-mode" class="tab active" type="button">控制模式</button>
+      <button id="tab-display" class="tab" type="button">图像显示</button>
       <button id="tab-sense" class="tab" type="button">灵敏度</button>
-      <button id="tab-bind" class="tab" type="button">热键&映射</button>
+      <button id="tab-bind" class="tab" type="button">按键&映射</button>
     </aside>
 
     <main class="middle">
       <div class="middle-scroll" id="middle-scroll">
-        <section id="page-display" class="page">
+        <section id="page-mode" class="page">
+          <div class="row">
+            <label id="lbl-mode_direction_enable" class="lbl">方向控制</label>
+            <input id="mode_direction_enable" type="checkbox" />
+          </div>
+          <div class="row">
+            <label id="lbl-mode_linear_pedal_enable" class="lbl">线性油刹</label>
+            <input id="mode_linear_pedal_enable" type="checkbox" />
+          </div>
+          <div class="row">
+            <label id="lbl-mode_key_pedal_enable" class="lbl">按键油刹</label>
+            <input id="mode_key_pedal_enable" type="checkbox" />
+          </div>
+        </section>
+
+        <section id="page-display" class="page hidden">
           <div class="row">
             <label id="lbl-fullscreen_mode" class="lbl">全屏模式</label>
             <input id="fullscreen_mode" type="checkbox" />
@@ -29,6 +45,11 @@
           <div class="row">
             <label id="lbl-fullscreen_scale" class="lbl">全屏缩放 (0.8 - 1.5)</label>
             <input id="fullscreen_scale" class="inp" />
+          </div>
+          <div class="row">
+            <label id="lbl-fullscreen_alpha" class="lbl">全屏透明度 (0 - 1.00)</label>
+            <input id="fullscreen_alpha" class="inp" />
+            <button id="btn-reset-fullscreen-alpha" class="icon-btn" title="重置" type="button">↺</button>
           </div>
           <div class="row">
             <label id="lbl-hud_fps" class="lbl">HUD FPS</label>
@@ -43,6 +64,16 @@
         </section>
 
         <section id="page-sense" class="page hidden">
+          <div class="row">
+            <label id="lbl-reference_range_x_ratio" class="lbl">转向灵敏度X比例 (0 - 1)</label>
+            <input id="reference_range_x_ratio" class="inp" />
+            <button id="btn-reset-ref-x-ratio" class="icon-btn" title="重置" type="button">↺</button>
+          </div>
+          <div class="row">
+            <label id="lbl-reference_range_y_ratio" class="lbl">油刹灵敏度Y比例 (0 - 1)</label>
+            <input id="reference_range_y_ratio" class="inp" />
+            <button id="btn-reset-ref-y-ratio" class="icon-btn" title="重置" type="button">↺</button>
+          </div>
           <div class="row">
             <label id="lbl-min_output_x" class="lbl">非零方向起始输出 (0 - 1)</label>
             <input id="min_output_x" class="inp" />
@@ -148,15 +179,6 @@
           </div>
 
           <div class="subttl">映射</div>
-          <div class="row">
-            <label id="lbl-control_mode" class="lbl">方向控制模式</label>
-            <select id="control_mode" class="sel">
-              <option value="1">模式1 方向+线性油刹</option>
-              <option value="2">模式2 方向+按键油刹</option>
-              <option value="3">模式3 仅线性油刹</option>
-              <option value="4">模式4 仅按键油刹</option>
-            </select>
-          </div>
           <div class="row">
             <label id="lbl-steering_axis" class="lbl">转向映射轴</label>
             <select id="steering_axis" class="sel">

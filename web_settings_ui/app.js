@@ -1,24 +1,31 @@
 ﻿const detailEl = document.getElementById("detail");
 const tabs = {
+  mode: document.getElementById("tab-mode"),
   display: document.getElementById("tab-display"),
   sense: document.getElementById("tab-sense"),
   bind: document.getElementById("tab-bind"),
 };
 const pages = {
+  mode: document.getElementById("page-mode"),
   display: document.getElementById("page-display"),
   sense: document.getElementById("page-sense"),
   bind: document.getElementById("page-bind"),
 };
 
 const inputs = {
+  mode_direction_enable: document.getElementById("mode_direction_enable"),
+  mode_linear_pedal_enable: document.getElementById("mode_linear_pedal_enable"),
+  mode_key_pedal_enable: document.getElementById("mode_key_pedal_enable"),
   fullscreen_mode: document.getElementById("fullscreen_mode"),
   window_scale: document.getElementById("window_scale"),
   fullscreen_scale: document.getElementById("fullscreen_scale"),
+  fullscreen_alpha: document.getElementById("fullscreen_alpha"),
   hud_fps: document.getElementById("hud_fps"),
+  reference_range_x_ratio: document.getElementById("reference_range_x_ratio"),
+  reference_range_y_ratio: document.getElementById("reference_range_y_ratio"),
   min_output_x: document.getElementById("min_output_x"),
   gear_pulse_ms: document.getElementById("gear_pulse_ms"),
   hide_cursor_on_enable: document.getElementById("hide_cursor_on_enable"),
-  control_mode: document.getElementById("control_mode"),
   steering_axis: document.getElementById("steering_axis"),
   toggle_hotkey: document.getElementById("toggle_hotkey"),
   switch_mode_hotkey: document.getElementById("switch_mode_hotkey"),
@@ -41,17 +48,23 @@ const inputs = {
 };
 
 const detailMap = {
+  mode: "控制模式设置提示。",
   display: "图像显示设置提示。",
   sense: "灵敏度设置提示。",
   bind: "快捷键与映射设置提示。",
+  mode_direction_enable: "是否启用方向控制。",
+  mode_linear_pedal_enable: "是否启用线性油刹（鼠标位移控制油刹）。",
+  mode_key_pedal_enable: "是否启用按键油刹（按键/映射触发油刹）。",
   fullscreen_mode: "切换 HUD 全屏或窗口模式。",
   window_scale: "小窗显示缩放比例。",
   fullscreen_scale: "全屏显示缩放比例。",
+  fullscreen_alpha: "全屏下三滑块与锁定/设置按钮的透明度。",
   hud_fps: "HUD 刷新帧率档位。",
+  reference_range_x_ratio: "转向灵敏度X比例。公式：1 - reference_range_x_px / (屏幕宽度/2)。",
+  reference_range_y_ratio: "油刹灵敏度Y比例。公式：1 - reference_range_y_px / (屏幕高度/2)。",
   min_output_x: "非零方向起始输出，值越大起步越敏感。",
   gear_pulse_ms: "换挡脉冲持续时长（毫秒）。",
   hide_cursor_on_enable: "实验功能：开启映射时尝试隐藏光标。",
-  control_mode: "方向控制模式。",
   steering_axis: "转向映射到哪个摇杆轴。",
   toggle_hotkey: "点击输入框后按组合键完成映射。",
   switch_mode_hotkey: "点击输入框后按组合键完成映射。",
@@ -78,6 +91,9 @@ const FALLBACK_DEFAULTS = {
   fullscreen_mode: false,
   window_scale: 1.0,
   fullscreen_scale: 1.0,
+  fullscreen_alpha: 0.5,
+  reference_range_x_ratio: 0.625,
+  reference_range_y_ratio: 0.5185,
   min_output_x: 0.235,
   gear_pulse_ms: 45,
   hide_cursor_on_enable: true,
@@ -130,13 +146,34 @@ function applyPedalModeVisibility() {
 }
 
 function showPage(kind) {
+  tabs.mode.classList.toggle("active", kind === "mode");
   tabs.display.classList.toggle("active", kind === "display");
   tabs.sense.classList.toggle("active", kind === "sense");
   tabs.bind.classList.toggle("active", kind === "bind");
+  pages.mode.classList.toggle("hidden", kind !== "mode");
   pages.display.classList.toggle("hidden", kind !== "display");
   pages.sense.classList.toggle("hidden", kind !== "sense");
   pages.bind.classList.toggle("hidden", kind !== "bind");
   detailEl.textContent = detailMap[kind] || "";
+}
+
+function controlModeToFlags(mode) {
+  const m = parseInt(mode || "1", 10);
+  if (m === 2) return { direction: true, linear: false, key: true };
+  if (m === 3) return { direction: false, linear: true, key: false };
+  if (m === 4) return { direction: false, linear: false, key: true };
+  return { direction: true, linear: true, key: false };
+}
+
+function flagsToControlMode(direction, linear, key) {
+  const d = !!direction;
+  const l = !!linear;
+  const k = !!key;
+  if (d && l) return 1;
+  if (d && k) return 2;
+  if (!d && l) return 3;
+  if (!d && k) return 4;
+  return 1;
 }
 
 function fillSelect(selectEl, values) {
@@ -168,26 +205,28 @@ function applyOptionsFromConfig() {
   fillSelect(inputs.brake_output_button, OPTIONS.gamepad_bindings || []);
   fillSelect(inputs.gear_up_button, OPTIONS.gamepad_bindings || []);
   fillSelect(inputs.gear_down_button, OPTIONS.gamepad_bindings || []);
-  const controlModes = OPTIONS.control_modes || ["1", "2", "3", "4"];
-  const controlLabels = {
-    "1": "模式1 方向+线性油刹",
-    "2": "模式2 方向+按键油刹",
-    "3": "模式3 仅线性油刹",
-    "4": "模式4 仅按键油刹",
-  };
-  fillSelectWithLabels(inputs.control_mode, controlModes.map((v) => ({ value: v, label: controlLabels[v] || `模式${v}` })));
 }
 
 function parseValues() {
   return {
     hud_fps: parseInt(inputs.hud_fps.value || String(DEFAULTS.hud_fps), 10),
     fullscreen_mode: !!inputs.fullscreen_mode.checked,
+    mode_direction_enable: !!inputs.mode_direction_enable.checked,
+    mode_linear_pedal_enable: !!inputs.mode_linear_pedal_enable.checked,
+    mode_key_pedal_enable: !!inputs.mode_key_pedal_enable.checked,
     window_scale: clamp(parseFloat(inputs.window_scale.value || String(DEFAULTS.window_scale)), 0.8, 1.5),
     fullscreen_scale: clamp(parseFloat(inputs.fullscreen_scale.value || String(DEFAULTS.fullscreen_scale)), 0.8, 1.5),
+    fullscreen_alpha: clamp(parseFloat(inputs.fullscreen_alpha.value || String(DEFAULTS.fullscreen_alpha)), 0.0, 1.0),
+    reference_range_x_ratio: clamp(parseFloat(inputs.reference_range_x_ratio.value || String(DEFAULTS.reference_range_x_ratio)), 0.0, 1.0),
+    reference_range_y_ratio: clamp(parseFloat(inputs.reference_range_y_ratio.value || String(DEFAULTS.reference_range_y_ratio)), 0.0, 1.0),
     min_output_x: clamp(parseFloat(inputs.min_output_x.value || String(DEFAULTS.min_output_x)), 0.0, 1.0),
     gear_pulse_ms: Math.round(clamp(parseFloat(inputs.gear_pulse_ms.value || String(DEFAULTS.gear_pulse_ms)), 10, 300)),
     hide_cursor_on_enable: inputs.hide_cursor_on_enable.value === "true",
-    control_mode: parseInt(inputs.control_mode.value || "1", 10),
+    control_mode: flagsToControlMode(
+      inputs.mode_direction_enable.checked,
+      inputs.mode_linear_pedal_enable.checked,
+      inputs.mode_key_pedal_enable.checked
+    ),
     steering_axis: (inputs.steering_axis.value || String(DEFAULTS.steering_axis)).trim(),
     toggle_hotkey: (inputs.toggle_hotkey.value || "").trim(),
     switch_mode_hotkey: (inputs.switch_mode_hotkey.value || "").trim(),
@@ -215,10 +254,16 @@ function setValues(v) {
   inputs.fullscreen_mode.checked = !!(v.fullscreen_mode ?? DEFAULTS.fullscreen_mode);
   inputs.window_scale.value = Number(v.window_scale ?? DEFAULTS.window_scale).toFixed(2);
   inputs.fullscreen_scale.value = Number(v.fullscreen_scale ?? DEFAULTS.fullscreen_scale).toFixed(2);
+  inputs.fullscreen_alpha.value = Number(v.fullscreen_alpha ?? DEFAULTS.fullscreen_alpha).toFixed(2);
+  inputs.reference_range_x_ratio.value = Number(v.reference_range_x_ratio ?? DEFAULTS.reference_range_x_ratio).toFixed(2);
+  inputs.reference_range_y_ratio.value = Number(v.reference_range_y_ratio ?? DEFAULTS.reference_range_y_ratio).toFixed(2);
   inputs.min_output_x.value = Number(v.min_output_x ?? DEFAULTS.min_output_x).toFixed(3);
   inputs.gear_pulse_ms.value = String(v.gear_pulse_ms ?? DEFAULTS.gear_pulse_ms);
   inputs.hide_cursor_on_enable.value = (v.hide_cursor_on_enable ? "true" : "false");
-  inputs.control_mode.value = String(v.control_mode ?? DEFAULTS.control_mode);
+  const flags = controlModeToFlags(v.control_mode ?? DEFAULTS.control_mode);
+  inputs.mode_direction_enable.checked = !!(v.mode_direction_enable ?? flags.direction);
+  inputs.mode_linear_pedal_enable.checked = !!(v.mode_linear_pedal_enable ?? flags.linear);
+  inputs.mode_key_pedal_enable.checked = !!(v.mode_key_pedal_enable ?? flags.key);
   inputs.steering_axis.value = String(v.steering_axis ?? DEFAULTS.steering_axis);
   inputs.toggle_hotkey.value = String(v.toggle_hotkey ?? DEFAULTS.toggle_hotkey);
   inputs.switch_mode_hotkey.value = String(v.switch_mode_hotkey ?? DEFAULTS.switch_mode_hotkey);
@@ -338,7 +383,8 @@ async function closePanel() {
 function bindHoverDetail(el, key) {
   el.addEventListener("mouseenter", () => { detailEl.textContent = detailMap[key] || ""; });
   el.addEventListener("mouseleave", () => {
-    if (tabs.display.classList.contains("active")) detailEl.textContent = detailMap.display;
+    if (tabs.mode.classList.contains("active")) detailEl.textContent = detailMap.mode;
+    else if (tabs.display.classList.contains("active")) detailEl.textContent = detailMap.display;
     else if (tabs.sense.classList.contains("active")) detailEl.textContent = detailMap.sense;
     else detailEl.textContent = detailMap.bind;
   });
@@ -421,6 +467,7 @@ document.addEventListener("mousemove", (e) => {
   const dx = e.clientX - dragState.x;
   const raw = clamp(dragState.start + dx * dragState.step, dragState.lo, dragState.hi);
   if (dragState.key === "min_output_x") inputs[dragState.key].value = raw.toFixed(3);
+  else if (dragState.key === "reference_range_x_ratio" || dragState.key === "reference_range_y_ratio") inputs[dragState.key].value = raw.toFixed(2);
   else if (dragState.key === "gear_pulse_ms") inputs[dragState.key].value = String(Math.round(raw));
   else inputs[dragState.key].value = raw.toFixed(2);
 });
@@ -434,6 +481,9 @@ function setField(field, value) {
 }
 
 function wireIconActions() {
+  document.getElementById("btn-reset-fullscreen-alpha").addEventListener("click", () => setField("fullscreen_alpha", String(DEFAULTS.fullscreen_alpha)));
+  document.getElementById("btn-reset-ref-x-ratio").addEventListener("click", () => setField("reference_range_x_ratio", String(DEFAULTS.reference_range_x_ratio)));
+  document.getElementById("btn-reset-ref-y-ratio").addEventListener("click", () => setField("reference_range_y_ratio", String(DEFAULTS.reference_range_y_ratio)));
   document.getElementById("btn-reset-min-output").addEventListener("click", () => setField("min_output_x", String(DEFAULTS.min_output_x)));
   document.getElementById("btn-reset-gear-pulse").addEventListener("click", () => setField("gear_pulse_ms", String(DEFAULTS.gear_pulse_ms)));
   document.getElementById("btn-reset-hide-cursor").addEventListener("click", () => setField("hide_cursor_on_enable", String(DEFAULTS.hide_cursor_on_enable)));
@@ -446,6 +496,7 @@ function wireIconActions() {
   });
 }
 
+tabs.mode.addEventListener("click", () => showPage("mode"));
 tabs.display.addEventListener("click", () => showPage("display"));
 tabs.sense.addEventListener("click", () => showPage("sense"));
 tabs.bind.addEventListener("click", () => showPage("bind"));
@@ -476,7 +527,7 @@ document.getElementById("btn-reset-all").addEventListener("click", () => {
 for (const key of Object.keys(inputs)) {
   if (inputs[key]) bindHoverDetail(inputs[key], key);
 }
-["fullscreen_mode", "window_scale", "fullscreen_scale", "hud_fps", "min_output_x", "gear_pulse_ms", "hide_cursor_on_enable", "control_mode", "steering_axis", "toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
+["mode_direction_enable", "mode_linear_pedal_enable", "mode_key_pedal_enable", "fullscreen_mode", "window_scale", "fullscreen_scale", "fullscreen_alpha", "hud_fps", "reference_range_x_ratio", "reference_range_y_ratio", "min_output_x", "gear_pulse_ms", "hide_cursor_on_enable", "steering_axis", "toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"].forEach((k) => {
   const lbl = document.getElementById(`lbl-${k}`);
   if (lbl) bindHoverDetail(lbl, k);
 });
@@ -485,6 +536,12 @@ bindDragAdjust(document.getElementById("lbl-window_scale"), "window_scale", 0.8,
 bindDragAdjust(inputs.window_scale, "window_scale", 0.8, 1.5, 0.01);
 bindDragAdjust(document.getElementById("lbl-fullscreen_scale"), "fullscreen_scale", 0.8, 1.5, 0.01);
 bindDragAdjust(inputs.fullscreen_scale, "fullscreen_scale", 0.8, 1.5, 0.01);
+bindDragAdjust(document.getElementById("lbl-fullscreen_alpha"), "fullscreen_alpha", 0, 1, 0.01);
+bindDragAdjust(inputs.fullscreen_alpha, "fullscreen_alpha", 0, 1, 0.01);
+bindDragAdjust(document.getElementById("lbl-reference_range_x_ratio"), "reference_range_x_ratio", 0, 1, 0.01);
+bindDragAdjust(inputs.reference_range_x_ratio, "reference_range_x_ratio", 0, 1, 0.01);
+bindDragAdjust(document.getElementById("lbl-reference_range_y_ratio"), "reference_range_y_ratio", 0, 1, 0.01);
+bindDragAdjust(inputs.reference_range_y_ratio, "reference_range_y_ratio", 0, 1, 0.01);
 bindDragAdjust(document.getElementById("lbl-min_output_x"), "min_output_x", 0, 1, 0.01);
 bindDragAdjust(inputs.min_output_x, "min_output_x", 0, 1, 0.01);
 bindDragAdjust(document.getElementById("lbl-gear_pulse_ms"), "gear_pulse_ms", 10, 300, 1);
@@ -547,7 +604,7 @@ async function initSettingsUI() {
   setValues(init);
   initialValues = parseValues();
   validateHotkeyConflicts(false);
-  showPage("display");
+  showPage("mode");
 }
 
 window.addEventListener("pywebviewready", () => {

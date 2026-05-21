@@ -30,11 +30,14 @@ ICON_UNLOCK = "\uE785"
 @dataclass
 class AppConfig:
     control_mode: int = 1
+    mode_direction_enable: bool = True
+    mode_linear_pedal_enable: bool = True
+    mode_key_pedal_enable: bool = False
     steering_axis: str = "left_x"
     reference_range_x_px: float = 360.0
     reference_range_y_px: float = 260.0
-    reference_range_x_ratio: float = 0.1875
-    reference_range_y_ratio: float = 0.2407
+    reference_range_x_ratio: float = 0.6250
+    reference_range_y_ratio: float = 0.5185
     min_output_x: float = 0.235
     debug_mode: bool = False
     hud_fps: int = 25
@@ -61,6 +64,7 @@ class AppConfig:
     hide_cursor_on_enable: bool = True
     windows_scale: float = 1.0
     fullscreen_scale: float = 1.0
+    fullscreen_alpha: float = 0.5
 
 
 @dataclass
@@ -78,6 +82,28 @@ class MapperState:
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+def control_mode_to_flags(mode: int) -> tuple[bool, bool, bool]:
+    if mode == 2:
+        return True, False, True
+    if mode == 3:
+        return False, True, False
+    if mode == 4:
+        return False, False, True
+    return True, True, False
+
+
+def flags_to_control_mode(direction: bool, linear: bool, key_pedal: bool) -> int:
+    if direction and linear:
+        return 1
+    if direction and key_pedal:
+        return 2
+    if (not direction) and linear:
+        return 3
+    if (not direction) and key_pedal:
+        return 4
+    return 1
 
 
 def to_xinput_short(v: float) -> int:
@@ -362,6 +388,9 @@ def load_config() -> AppConfig:
 
     if parser.has_section(section):
         cfg.control_mode = parser.getint(section, "control_mode", fallback=cfg.control_mode)
+        cfg.mode_direction_enable = parser.getboolean(section, "mode_direction_enable", fallback=cfg.mode_direction_enable)
+        cfg.mode_linear_pedal_enable = parser.getboolean(section, "mode_linear_pedal_enable", fallback=cfg.mode_linear_pedal_enable)
+        cfg.mode_key_pedal_enable = parser.getboolean(section, "mode_key_pedal_enable", fallback=cfg.mode_key_pedal_enable)
         cfg.steering_axis = parser.get(section, "steering_axis", fallback=cfg.steering_axis)
         cfg.reference_range_x_px = parser.getfloat(section, "reference_range_x_px", fallback=cfg.reference_range_x_px)
         cfg.reference_range_y_px = parser.getfloat(section, "reference_range_y_px", fallback=cfg.reference_range_y_px)
@@ -393,18 +422,41 @@ def load_config() -> AppConfig:
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
         cfg.windows_scale = parser.getfloat(section, "windows_scale", fallback=cfg.windows_scale)
         cfg.fullscreen_scale = parser.getfloat(section, "fullscreen_scale", fallback=cfg.fullscreen_scale)
+        cfg.fullscreen_alpha = parser.getfloat(section, "fullscreen_alpha", fallback=cfg.fullscreen_alpha)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
+    # Backward compatibility: if new independent flags are missing, derive from old 1..4 mode.
+    try:
+        has_mode_direction = parser.has_option(section, "mode_direction_enable")
+        has_mode_linear = parser.has_option(section, "mode_linear_pedal_enable")
+        has_mode_key = parser.has_option(section, "mode_key_pedal_enable")
+        if not (has_mode_direction and has_mode_linear and has_mode_key):
+            d, l, k = control_mode_to_flags(cfg.control_mode)
+            cfg.mode_direction_enable = d
+            cfg.mode_linear_pedal_enable = l
+            cfg.mode_key_pedal_enable = k
+    except Exception:
+        d, l, k = control_mode_to_flags(cfg.control_mode)
+        cfg.mode_direction_enable = d
+        cfg.mode_linear_pedal_enable = l
+        cfg.mode_key_pedal_enable = k
+    cfg.control_mode = flags_to_control_mode(
+        bool(cfg.mode_direction_enable),
+        bool(cfg.mode_linear_pedal_enable),
+        bool(cfg.mode_key_pedal_enable),
+    )
     if cfg.steering_axis not in {"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"}:
         cfg.steering_axis = "left_x"
     cfg.reference_range_x_px = max(1.0, cfg.reference_range_x_px)
     cfg.reference_range_y_px = max(1.0, cfg.reference_range_y_px)
-    # Backward compatible migration: if ratio missing/invalid, derive from old px baseline.
-    if not (0.01 <= cfg.reference_range_x_ratio <= 1.0):
-        cfg.reference_range_x_ratio = clamp(cfg.reference_range_x_px / 1920.0, 0.01, 1.0)
-    if not (0.01 <= cfg.reference_range_y_ratio <= 1.0):
-        cfg.reference_range_y_ratio = clamp(cfg.reference_range_y_px / 1080.0, 0.01, 1.0)
+    # New ratio semantics:
+    # ratio = 1 - reference_range_px / (screen_half)
+    # keep old px fields for backward compatibility and derive ratio when invalid.
+    if not (0.0 <= cfg.reference_range_x_ratio <= 1.0):
+        cfg.reference_range_x_ratio = clamp(1.0 - (cfg.reference_range_x_px / 960.0), 0.0, 1.0)
+    if not (0.0 <= cfg.reference_range_y_ratio <= 1.0):
+        cfg.reference_range_y_ratio = clamp(1.0 - (cfg.reference_range_y_px / 540.0), 0.0, 1.0)
     cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 1.0)
     hud_fps_options = tuple(int(x) for x in load_settings_options().get("hud_fps", list(HUD_FPS_OPTIONS)))
     if cfg.hud_fps not in hud_fps_options:
@@ -428,6 +480,7 @@ def load_config() -> AppConfig:
         cfg.gear_down_button = "left_thumb"
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 1.5)
     cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 1.5)
+    cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 1.0)
     return cfg
 
 
@@ -435,6 +488,9 @@ def save_default_config(cfg: AppConfig) -> None:
     parser = configparser.ConfigParser()
     parser["mapping"] = {
         "control_mode": str(cfg.control_mode),
+        "mode_direction_enable": str(cfg.mode_direction_enable).lower(),
+        "mode_linear_pedal_enable": str(cfg.mode_linear_pedal_enable).lower(),
+        "mode_key_pedal_enable": str(cfg.mode_key_pedal_enable).lower(),
         "steering_axis": cfg.steering_axis,
         "reference_range_x_px": str(cfg.reference_range_x_px),
         "reference_range_y_px": str(cfg.reference_range_y_px),
@@ -466,6 +522,7 @@ def save_default_config(cfg: AppConfig) -> None:
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
         "windows_scale": f"{cfg.windows_scale:.2f}",
         "fullscreen_scale": f"{cfg.fullscreen_scale:.2f}",
+        "fullscreen_alpha": f"{cfg.fullscreen_alpha:.2f}",
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
@@ -519,10 +576,14 @@ def load_settings_defaults() -> dict:
         "fullscreen_mode": False,
         "window_scale": 1.0,
         "fullscreen_scale": 1.0,
+        "fullscreen_alpha": 0.5,
         "min_output_x": 0.235,
         "gear_pulse_ms": 45,
         "hide_cursor_on_enable": True,
         "control_mode": 1,
+        "mode_direction_enable": True,
+        "mode_linear_pedal_enable": True,
+        "mode_key_pedal_enable": False,
         "steering_axis": "left_x",
         "toggle_hotkey": "shift+v",
         "switch_mode_hotkey": "alt+shift+v",
@@ -545,8 +606,8 @@ def load_settings_defaults() -> dict:
         "debug_mode": False,
         "reference_range_x_px": 360.0,
         "reference_range_y_px": 260.0,
-        "reference_range_x_ratio": 0.1875,
-        "reference_range_y_ratio": 0.2407,
+        "reference_range_x_ratio": 0.6250,
+        "reference_range_y_ratio": 0.5185,
     }
     try:
         if SETTINGS_DEFAULTS_PATH.exists():
@@ -557,7 +618,9 @@ def load_settings_defaults() -> dict:
                     result[k] = parser.get(sec, k, fallback=str(result[k]))
                 for k in ("hud_fps", "gear_pulse_ms", "control_mode"):
                     result[k] = parser.getint(sec, k, fallback=int(result[k]))
-                for k in ("window_scale", "fullscreen_scale", "min_output_x", "reference_range_x_px", "reference_range_y_px", "reference_range_x_ratio", "reference_range_y_ratio"):
+                for k in ("mode_direction_enable", "mode_linear_pedal_enable", "mode_key_pedal_enable"):
+                    result[k] = _to_bool(parser.get(sec, k, fallback=str(result[k])), bool(result[k]))
+                for k in ("window_scale", "fullscreen_scale", "fullscreen_alpha", "min_output_x", "reference_range_x_px", "reference_range_y_px", "reference_range_x_ratio", "reference_range_y_ratio"):
                     result[k] = parser.getfloat(sec, k, fallback=float(result[k]))
                 result["fullscreen_mode"] = _to_bool(parser.get(sec, "fullscreen_mode", fallback=str(result["fullscreen_mode"])), bool(result["fullscreen_mode"]))
                 result["hide_cursor_on_enable"] = _to_bool(parser.get(sec, "hide_cursor_on_enable", fallback=str(result["hide_cursor_on_enable"])), bool(result["hide_cursor_on_enable"]))
@@ -572,10 +635,14 @@ def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
     cfg.fullscreen_mode = bool(defaults.get("fullscreen_mode", cfg.fullscreen_mode))
     cfg.windows_scale = float(defaults.get("window_scale", cfg.windows_scale))
     cfg.fullscreen_scale = float(defaults.get("fullscreen_scale", cfg.fullscreen_scale))
+    cfg.fullscreen_alpha = float(defaults.get("fullscreen_alpha", cfg.fullscreen_alpha))
     cfg.min_output_x = float(defaults.get("min_output_x", cfg.min_output_x))
     cfg.gear_pulse_ms = int(defaults.get("gear_pulse_ms", cfg.gear_pulse_ms))
     cfg.hide_cursor_on_enable = bool(defaults.get("hide_cursor_on_enable", cfg.hide_cursor_on_enable))
     cfg.control_mode = int(defaults.get("control_mode", cfg.control_mode))
+    cfg.mode_direction_enable = bool(defaults.get("mode_direction_enable", cfg.mode_direction_enable))
+    cfg.mode_linear_pedal_enable = bool(defaults.get("mode_linear_pedal_enable", cfg.mode_linear_pedal_enable))
+    cfg.mode_key_pedal_enable = bool(defaults.get("mode_key_pedal_enable", cfg.mode_key_pedal_enable))
     cfg.steering_axis = str(defaults.get("steering_axis", cfg.steering_axis))
     cfg.toggle_hotkey = str(defaults.get("toggle_hotkey", cfg.toggle_hotkey))
     cfg.switch_mode_hotkey = str(defaults.get("switch_mode_hotkey", cfg.switch_mode_hotkey))
@@ -600,6 +667,11 @@ def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
     cfg.reference_range_y_px = float(defaults.get("reference_range_y_px", cfg.reference_range_y_px))
     cfg.reference_range_x_ratio = float(defaults.get("reference_range_x_ratio", cfg.reference_range_x_ratio))
     cfg.reference_range_y_ratio = float(defaults.get("reference_range_y_ratio", cfg.reference_range_y_ratio))
+    cfg.control_mode = flags_to_control_mode(
+        bool(cfg.mode_direction_enable),
+        bool(cfg.mode_linear_pedal_enable),
+        bool(cfg.mode_key_pedal_enable),
+    )
 
 
 def current_hud_fps_options() -> tuple[int, ...]:
@@ -618,6 +690,7 @@ class Indicator:
         min_output_x: float = 0.235,
         windows_scale: float = 1.0,
         fullscreen_scale: float = 1.0,
+        fullscreen_alpha: float = 0.5,
         settings_getter=None,
         settings_apply_callback=None,
         settings_open_callback=None,
@@ -628,6 +701,7 @@ class Indicator:
         self.min_output_x = clamp(min_output_x, 0.0, 1.0)
         self.window_scale = clamp(windows_scale, 0.8, 1.5)
         self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 1.5)
+        self.fullscreen_alpha = clamp(fullscreen_alpha, 0.0, 1.0)
         self.ui_scale = max(1.15, self.window_scale * 1.15)
         self.settings_getter = settings_getter
         self.settings_apply_callback = settings_apply_callback
@@ -679,14 +753,12 @@ class Indicator:
         self.frame.pack(fill="both", expand=True)
         self.header = tk.Frame(self.frame, bg="#1f1f1f")
         self.header.pack(fill="x")
-        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(10), "bold"), anchor="w")
+        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(14), "bold"), anchor="w")
         self.status_label.pack(side="left", fill="x", expand=True)
         self.lock_button = tk.Button(self.header, text=ICON_LOCK, width=2, command=self.toggle_lock, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=(ICON_FONT_FAMILY, self._font(10), "normal"))
         self.lock_button.pack(side="right")
         self.settings_button = tk.Button(self.header, text=ICON_SETTINGS, width=2, command=self.open_settings_panel, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=(ICON_FONT_FAMILY, self._font(10), "normal"))
         self.settings_button.pack(side="right", padx=(0, 6))
-        self.mode_label = tk.Label(self.frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", self._font(9)), anchor="w", justify="left")
-        self.mode_label.pack(fill="x")
         self.canvas = tk.Canvas(self.frame, width=100, height=100, bg="#171717", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.error_label = tk.Label(self.frame, text="", fg="#ffcc66", bg="#1f1f1f", font=("Segoe UI", self._font(8)), anchor="w", justify="left")
@@ -889,8 +961,7 @@ class Indicator:
         c.configure(width=sw, height=sh)
         c.configure(bg=self.fullscreen_bg_key, highlightthickness=0, bd=0)
         # HUD text anchors
-        self.scene["status_text"] = c.create_text(28, 28, text="状态: OFF", fill="#ffffff", font=("Segoe UI", self._font(20), "bold"), anchor="nw")
-        self.scene["mode_text"] = c.create_text(28, 28 + self._font(20) + 14, text="模式: -", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="nw")
+        self.scene["status_text"] = c.create_text(28, 28, text="状态: OFF", fill="#ffffff", font=("Segoe UI", self._font(24), "bold"), anchor="nw")
         self.scene["error_text"] = c.create_text(28, sh - 28, text="", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="sw")
         self.scene["debug_text"] = c.create_text(28, sh - 28 - self._font(16) - 10, text="", fill="#d6f0ff", font=("Consolas", self._font(12)), anchor="sw")
         # Fullscreen top-right icons: settings + lock
@@ -919,10 +990,21 @@ class Indicator:
         gas_ox = ox + int(self.fs_gas_offset_x)
         gas_oy = oy + int(self.fs_gas_offset_y)
         center_x = sw // 2
+        alpha = clamp(self.fullscreen_alpha, 0.0, 1.0)
+        if alpha >= 0.85:
+            fs_stipple = ""
+        elif alpha >= 0.65:
+            fs_stipple = "gray75"
+        elif alpha >= 0.45:
+            fs_stipple = "gray50"
+        elif alpha >= 0.25:
+            fs_stipple = "gray25"
+        else:
+            fs_stipple = "gray12"
         lx_w = int(sw * 0.34)
         lx_h = max(20, int(sh * 0.028))
         lx_y = int(sh * 0.75)
-        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2 + lx_ox, lx_y - lx_h // 2 + lx_oy, center_x + lx_w // 2 + lx_ox, lx_y + lx_h // 2 + lx_oy, outline="#c7c7c7", fill="#000000")
+        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2 + lx_ox, lx_y - lx_h // 2 + lx_oy, center_x + lx_w // 2 + lx_ox, lx_y + lx_h // 2 + lx_oy, outline="#c7c7c7", fill="#000000", stipple=fs_stipple)
         c.create_line(center_x + lx_ox, lx_y - lx_h // 2 - 8 + lx_oy, center_x + lx_ox, lx_y + lx_h // 2 + 8 + lx_oy, fill="#e7eef5", width=2)
         self.scene["lx_fill"] = c.create_rectangle(center_x + lx_ox, lx_y - lx_h // 2 + 2 + lx_oy, center_x + lx_ox, lx_y + lx_h // 2 - 2 + lx_oy, outline="", fill="#67b7ff")
         bar_h = int(sh * 0.26)
@@ -931,9 +1013,9 @@ class Indicator:
         bars_y1 = bars_y0 + bar_h
         bx = int(sw * 0.70)
         gx = int(sw * 0.77)
-        self.scene["brake_track"] = c.create_rectangle(bx + brake_ox, bars_y0 + brake_oy, bx + bar_w + brake_ox, bars_y1 + brake_oy, outline="#c7c7c7", fill="#000000")
+        self.scene["brake_track"] = c.create_rectangle(bx + brake_ox, bars_y0 + brake_oy, bx + bar_w + brake_ox, bars_y1 + brake_oy, outline="#c7c7c7", fill="#000000", stipple=fs_stipple)
         self.scene["brake_fill"] = c.create_rectangle(bx + 1 + brake_ox, bars_y1 - 1 + brake_oy, bx + bar_w - 1 + brake_ox, bars_y1 - 1 + brake_oy, outline="", fill="#ff6b6b")
-        self.scene["gas_track"] = c.create_rectangle(gx + gas_ox, bars_y0 + gas_oy, gx + bar_w + gas_ox, bars_y1 + gas_oy, outline="#c7c7c7", fill="#000000")
+        self.scene["gas_track"] = c.create_rectangle(gx + gas_ox, bars_y0 + gas_oy, gx + bar_w + gas_ox, bars_y1 + gas_oy, outline="#c7c7c7", fill="#000000", stipple=fs_stipple)
         self.scene["gas_fill"] = c.create_rectangle(gx + 1 + gas_ox, bars_y1 - 1 + gas_oy, gx + bar_w - 1 + gas_ox, bars_y1 - 1 + gas_oy, outline="", fill="#37d45c")
         c.create_text(bx + bar_w // 2 + brake_ox, bars_y1 + 36 + brake_oy, text="刹车", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
         c.create_text(gx + bar_w // 2 + gas_ox, bars_y1 + 36 + gas_oy, text="油门", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
@@ -967,8 +1049,21 @@ class Indicator:
     def _update_fs_lock_visual(self) -> None:
         if "fs_lock_text" not in self.scene:
             return
+        alpha = clamp(self.fullscreen_alpha, 0.0, 1.0)
+        if alpha >= 0.85:
+            fs_stipple = ""
+        elif alpha >= 0.65:
+            fs_stipple = "gray75"
+        elif alpha >= 0.45:
+            fs_stipple = "gray50"
+        elif alpha >= 0.25:
+            fs_stipple = "gray25"
+        else:
+            fs_stipple = "gray12"
         self.canvas.itemconfig(self.scene["fs_lock_text"], text=(ICON_LOCK if self.locked else ICON_UNLOCK))
-        self.canvas.itemconfig(self.scene["fs_lock_bg"], fill=("#2d2d2d" if self.locked else "#196d2d"))
+        self.canvas.itemconfig(self.scene["fs_lock_bg"], fill=("#2d2d2d" if self.locked else "#196d2d"), stipple=fs_stipple)
+        if "fs_settings_bg" in self.scene:
+            self.canvas.itemconfig(self.scene["fs_settings_bg"], stipple=fs_stipple)
 
     def _in_fs_settings_bounds(self, x: int, y: int) -> bool:
         if not hasattr(self, "fs_settings_bounds"):
@@ -1025,10 +1120,9 @@ class Indicator:
         self.window_pad_y = max(3, int(round(4 * self.ui_scale)))
         self.lock_button_pack_kwargs = {"side": "right", "padx": self.window_pad_x, "pady": self.window_pad_y}
         self.settings_button_pack_kwargs = {"side": "right", "padx": (0, 6), "pady": self.window_pad_y}
-        self.status_label.configure(font=("Segoe UI", self._font(10), "bold"))
+        self.status_label.configure(font=("Segoe UI", self._font(14), "bold"))
         self.lock_button.configure(font=(ICON_FONT_FAMILY, self._font(9), "normal"))
         self.settings_button.configure(font=(ICON_FONT_FAMILY, self._font(9), "normal"))
-        self.mode_label.configure(font=("Segoe UI", self._font(9)))
         self.error_label.configure(font=("Segoe UI", self._font(8)))
         self.debug_label.configure(font=("Consolas", self._font(8)))
 
@@ -1039,6 +1133,7 @@ class Indicator:
             "hud_fps": self.hud_fps,
             "window_scale": self.window_scale,
             "fullscreen_scale": self.fullscreen_scale,
+            "fullscreen_alpha": self.fullscreen_alpha,
             "min_output_x": self.min_output_x,
         }
 
@@ -1120,6 +1215,7 @@ class Indicator:
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
         self.window_scale = clamp(float(values["window_scale"]), 0.8, 1.5)
         self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 1.5)
+        self.fullscreen_alpha = clamp(float(values.get("fullscreen_alpha", self.fullscreen_alpha)), 0.0, 1.0)
         self.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         if callable(self.settings_apply_callback):
             self.settings_apply_callback(dict(values), save_to_file)
@@ -1214,14 +1310,12 @@ class Indicator:
             self.frame.configure(bg=self.fullscreen_bg_key, bd=0)
             self.header.configure(bg=self.fullscreen_bg_key)
             self.status_label.configure(bg=self.fullscreen_bg_key)
-            self.mode_label.configure(bg=self.fullscreen_bg_key)
             self.error_label.configure(bg=self.fullscreen_bg_key)
             self.debug_label.configure(bg=self.fullscreen_bg_key)
             self.canvas.configure(bg=self.fullscreen_bg_key)
             self.lock_button.pack_forget()
             self.settings_button.pack_forget()
             self.header.pack_forget()
-            self.mode_label.pack_forget()
             self.error_label.pack_forget()
             self.debug_label.pack_forget()
             self.canvas.pack_forget()
@@ -1238,7 +1332,6 @@ class Indicator:
             self.frame.configure(bg="#1f1f1f", bd=1, relief="solid")
             self.header.configure(bg="#1f1f1f")
             self.status_label.configure(bg="#1f1f1f")
-            self.mode_label.configure(bg="#1f1f1f")
             self.error_label.configure(bg="#1f1f1f")
             self.debug_label.configure(bg="#1f1f1f")
             self.canvas.configure(bg="#171717")
@@ -1248,8 +1341,6 @@ class Indicator:
                 self.lock_button.pack(**self.lock_button_pack_kwargs)
             if not self.settings_button.winfo_manager():
                 self.settings_button.pack(**self.settings_button_pack_kwargs)
-            if not self.mode_label.winfo_manager():
-                self.mode_label.pack(fill="x")
             self.canvas.pack_forget()
             self.canvas.pack(fill="both", expand=True)
             if not self.error_label.winfo_manager():
@@ -1269,14 +1360,7 @@ class Indicator:
     ) -> None:
         self.set_fullscreen_rect(fullscreen_rect)
         self.apply_view_mode(fullscreen_enabled)
-        mode_names = {
-            1: "方向+线性油刹",
-            2: "方向+按键油刹",
-            3: "仅线性油刹",
-            4: "仅按键油刹",
-        }
         self.status_label.config(text="状态: ON" if state.enabled else "状态: OFF", fg="#7dff9b" if state.enabled else "#ff6b6b")
-        self.mode_label.config(text=f"模式{mode}: {mode_names.get(mode, '未知')}  (Shift+V开关 / Alt+Shift+V切模式)")
         self._draw_lx(state.left_x)
         self._draw_pedals(state.gas_active, state.brake_active, state.rt, state.lt)
         shown_error = self.local_error_text if self.local_error_text else state.last_error
@@ -1287,7 +1371,6 @@ class Indicator:
             self.debug_label.config(text="")
         if self.fullscreen_mode:
             self.canvas.itemconfig(self.scene["status_text"], text=("状态: ON" if state.enabled else "状态: OFF"), fill=("#7dff9b" if state.enabled else "#ff6b6b"))
-            self.canvas.itemconfig(self.scene["mode_text"], text=f"模式{mode}: {mode_names.get(mode, '未知')}")
             self.canvas.itemconfig(self.scene["error_text"], text=shown_error)
             self.canvas.itemconfig(self.scene["debug_text"], text=(state.debug_text if self.debug_mode else ""))
     def loop(
@@ -1404,6 +1487,9 @@ class MouseToVirtualGamepad:
         return {
             "hud_fps": self.config.hud_fps,
             "control_mode": self.config.control_mode,
+            "mode_direction_enable": self.config.mode_direction_enable,
+            "mode_linear_pedal_enable": self.config.mode_linear_pedal_enable,
+            "mode_key_pedal_enable": self.config.mode_key_pedal_enable,
             "steering_axis": self.config.steering_axis,
             "toggle_hotkey": self.config.toggle_hotkey,
             "switch_mode_hotkey": self.config.switch_mode_hotkey,
@@ -1428,6 +1514,9 @@ class MouseToVirtualGamepad:
             "hide_cursor_on_enable": self.config.hide_cursor_on_enable,
             "window_scale": self.config.windows_scale,
             "fullscreen_scale": self.config.fullscreen_scale,
+            "fullscreen_alpha": self.config.fullscreen_alpha,
+            "reference_range_x_ratio": self.config.reference_range_x_ratio,
+            "reference_range_y_ratio": self.config.reference_range_y_ratio,
             "min_output_x": self.config.min_output_x,
         }
 
@@ -1437,11 +1526,34 @@ class MouseToVirtualGamepad:
         except Exception:
             hud_fps = self.config.hud_fps
         self.config.hud_fps = hud_fps if hud_fps in current_hud_fps_options() else 60
-        try:
-            control_mode = int(values.get("control_mode", self.config.control_mode))
-        except Exception:
-            control_mode = self.config.control_mode
-        self.config.control_mode = int(clamp(control_mode, 1, 4))
+        direction = values.get("mode_direction_enable", None)
+        linear = values.get("mode_linear_pedal_enable", None)
+        key_pedal = values.get("mode_key_pedal_enable", None)
+        if direction is not None or linear is not None or key_pedal is not None:
+            self.config.mode_direction_enable = bool(
+                self.config.mode_direction_enable if direction is None else direction
+            )
+            self.config.mode_linear_pedal_enable = bool(
+                self.config.mode_linear_pedal_enable if linear is None else linear
+            )
+            self.config.mode_key_pedal_enable = bool(
+                self.config.mode_key_pedal_enable if key_pedal is None else key_pedal
+            )
+            self.config.control_mode = flags_to_control_mode(
+                self.config.mode_direction_enable,
+                self.config.mode_linear_pedal_enable,
+                self.config.mode_key_pedal_enable,
+            )
+        else:
+            try:
+                control_mode = int(values.get("control_mode", self.config.control_mode))
+            except Exception:
+                control_mode = self.config.control_mode
+            self.config.control_mode = int(clamp(control_mode, 1, 4))
+            d, l, k = control_mode_to_flags(self.config.control_mode)
+            self.config.mode_direction_enable = d
+            self.config.mode_linear_pedal_enable = l
+            self.config.mode_key_pedal_enable = k
         steering_axis = str(values.get("steering_axis", self.config.steering_axis)).strip().lower()
         if steering_axis in {"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"}:
             self.config.steering_axis = steering_axis
@@ -1475,6 +1587,12 @@ class MouseToVirtualGamepad:
         self.config.hide_cursor_on_enable = bool(values.get("hide_cursor_on_enable", self.config.hide_cursor_on_enable))
         self.config.windows_scale = clamp(float(values["window_scale"]), 0.8, 1.5)
         self.config.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 1.5)
+        self.config.fullscreen_alpha = clamp(float(values.get("fullscreen_alpha", self.config.fullscreen_alpha)), 0.0, 1.0)
+        self.config.reference_range_x_ratio = clamp(float(values.get("reference_range_x_ratio", self.config.reference_range_x_ratio)), 0.0, 1.0)
+        self.config.reference_range_y_ratio = clamp(float(values.get("reference_range_y_ratio", self.config.reference_range_y_ratio)), 0.0, 1.0)
+        # Keep legacy px fields aligned with the new ratio definition for compatibility.
+        self.config.reference_range_x_px = max(1.0, (1.0 - self.config.reference_range_x_ratio) * 960.0)
+        self.config.reference_range_y_px = max(1.0, (1.0 - self.config.reference_range_y_ratio) * 540.0)
         self.config.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
         self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
@@ -1530,8 +1648,10 @@ class MouseToVirtualGamepad:
         _, _, width, height = rect
         if width <= 0 or height <= 0:
             return (self.config.reference_range_x_px, self.config.reference_range_y_px)
-        rx = max(1.0, width * self.config.reference_range_x_ratio)
-        ry = max(1.0, height * self.config.reference_range_y_ratio)
+        half_w = max(1.0, width / 2.0)
+        half_h = max(1.0, height / 2.0)
+        rx = max(1.0, (1.0 - clamp(self.config.reference_range_x_ratio, 0.0, 1.0)) * half_w)
+        ry = max(1.0, (1.0 - clamp(self.config.reference_range_y_ratio, 0.0, 1.0)) * half_h)
         return (rx, ry)
 
     @staticmethod
@@ -1607,7 +1727,11 @@ class MouseToVirtualGamepad:
             self.config.control_mode += 1
             if self.config.control_mode > 4:
                 self.config.control_mode = 1
-            self.state.last_error = f"已切换到模式{self.config.control_mode}"
+            d, l, k = control_mode_to_flags(self.config.control_mode)
+            self.config.mode_direction_enable = d
+            self.config.mode_linear_pedal_enable = l
+            self.config.mode_key_pedal_enable = k
+            self.state.last_error = "控制模式模板已切换"
             return
 
         if self._combo_just_pressed("toggle_mapper", self.toggle_combo):
@@ -1736,10 +1860,8 @@ class MouseToVirtualGamepad:
         dx = self.current_pos[0] - self.reference_pos[0]
         dy = self.current_pos[1] - self.reference_pos[1]
 
-        # Steering:
-        # mode1/mode2: steering enabled by mouse X
-        # mode3/mode4: pedal-only, no steering
-        if self.config.control_mode in (1, 2):
+        # Steering enable can be toggled independently.
+        if self.config.mode_direction_enable:
             base_lx = self.axis_x
             abs_base_lx = abs(base_lx)
             if abs_base_lx > 0.0:
@@ -1750,41 +1872,35 @@ class MouseToVirtualGamepad:
         else:
             lx = 0.0
 
-        # Pedals are now RT/LT in all modes.
-        # mode1/mode3: linear RT/LT by mouse Y
-        # mode2/mode4: digital RT/LT by mouse buttons
-        if self.config.control_mode in (1, 3):
+        rt_linear = 0.0
+        lt_linear = 0.0
+        rt_key = 0.0
+        lt_key = 0.0
+
+        if self.config.mode_linear_pedal_enable:
             pedal = self.axis_y
             if pedal < 0.0:
-                self.state.rt = abs(pedal)
-                self.state.lt = 0.0
+                rt_linear = abs(pedal)
+                lt_linear = 0.0
             elif pedal > 0.0:
-                self.state.rt = 0.0
-                self.state.lt = abs(pedal)
-            else:
-                self.state.rt = 0.0
-                self.state.lt = 0.0
-            self.state.gas_active = self.state.rt > 0.0
-            self.state.brake_active = self.state.lt > 0.0
-        else:
+                rt_linear = 0.0
+                lt_linear = abs(pedal)
+
+        if self.config.mode_key_pedal_enable:
             now = time.time()
             gas_on = self.right_button_down or (now < self.gas_scroll_until)
             brake_on = self.left_button_down or (now < self.brake_scroll_until)
             if gas_on and not brake_on:
-                self.state.rt = 1.0
-                self.state.lt = 0.0
-                self.state.gas_active = True
-                self.state.brake_active = False
+                rt_key = 1.0
+                lt_key = 0.0
             elif brake_on and not gas_on:
-                self.state.rt = 0.0
-                self.state.lt = 1.0
-                self.state.gas_active = False
-                self.state.brake_active = True
-            else:
-                self.state.rt = 0.0
-                self.state.lt = 0.0
-                self.state.gas_active = False
-                self.state.brake_active = False
+                rt_key = 0.0
+                lt_key = 1.0
+
+        self.state.rt = clamp(max(rt_linear, rt_key), 0.0, 1.0)
+        self.state.lt = clamp(max(lt_linear, lt_key), 0.0, 1.0)
+        self.state.gas_active = self.state.rt > 0.0
+        self.state.brake_active = self.state.lt > 0.0
 
         self.state.left_x = lx
         # RY no longer controls pedals; keep centered for compatibility.
@@ -1798,6 +1914,7 @@ class MouseToVirtualGamepad:
         self,
         binding: str,
         active: bool,
+        strength: float,
         lx: int,
         ly: int,
         rx: int,
@@ -1808,6 +1925,7 @@ class MouseToVirtualGamepad:
         if not active or not binding or binding == "none":
             return lx, ly, rx, ry, lt, rt
         value = 32767
+        trigger_value = int(clamp(strength, 0.0, 1.0) * 255)
         if binding == "left_stick_left":
             lx = min(lx, -value)
         elif binding == "left_stick_right":
@@ -1825,9 +1943,9 @@ class MouseToVirtualGamepad:
         elif binding == "right_stick_down":
             ry = min(ry, -value)
         elif binding == "left_trigger":
-            lt = 255
+            lt = max(lt, trigger_value)
         elif binding == "right_trigger":
-            rt = 255
+            rt = max(rt, trigger_value)
         return lx, ly, rx, ry, lt, rt
 
     def push_to_gamepad(self) -> None:
@@ -1880,8 +1998,8 @@ class MouseToVirtualGamepad:
         else:
             self._update_keyboard_pedal_state(False, False)
             if self.pad is not None:
-                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gas_output_button, self.state.gas_active, lx, ly, rx, ry, lt, rt)
-                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.brake_output_button, self.state.brake_active, lx, ly, rx, ry, lt, rt)
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gas_output_button, self.state.gas_active, self.state.rt, lx, ly, rx, ry, lt, rt)
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.brake_output_button, self.state.brake_active, self.state.lt, lx, ly, rx, ry, lt, rt)
                 if self.config.gas_output_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gas_output_btn is not None:
                     self.pad.press_button(button=self.gas_output_btn) if self.state.gas_active else self.pad.release_button(button=self.gas_output_btn)
                 if self.config.brake_output_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.brake_output_btn is not None:
@@ -1903,8 +2021,8 @@ class MouseToVirtualGamepad:
         else:
             self._update_keyboard_shift_state(False, False)
             if self.pad is not None:
-                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gear_up_button, gear_up_pressed, lx, ly, rx, ry, lt, rt)
-                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gear_down_button, gear_down_pressed, lx, ly, rx, ry, lt, rt)
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gear_up_button, gear_up_pressed, 1.0, lx, ly, rx, ry, lt, rt)
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gear_down_button, gear_down_pressed, 1.0, lx, ly, rx, ry, lt, rt)
                 if self.config.gear_up_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_up_btn is not None:
                     self.pad.press_button(button=self.gear_up_btn) if gear_up_pressed else self.pad.release_button(button=self.gear_up_btn)
                 if self.config.gear_down_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_down_btn is not None:
@@ -2009,6 +2127,7 @@ class MouseToVirtualGamepad:
             min_output_x=self.config.min_output_x,
             windows_scale=self.config.windows_scale,
             fullscreen_scale=self.config.fullscreen_scale,
+            fullscreen_alpha=self.config.fullscreen_alpha,
             settings_getter=self.get_runtime_settings,
             settings_apply_callback=self.apply_runtime_settings,
             settings_open_callback=self.set_settings_panel_open,
