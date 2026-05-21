@@ -11,7 +11,14 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", sans-serif;
+}
 
 .layout {
   height: 100%;
@@ -20,12 +27,21 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   display: grid;
   grid-template-columns: 96px 1fr 230px;
   gap: 10px;
+  overflow: hidden;
 }
 
 .card { background: var(--panel); }
 .title { color: var(--muted); margin-bottom: 8px; white-space: nowrap; font-weight: 600; }
 
-.left { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.left {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .tab {
   background: transparent;
   color: var(--text);
@@ -39,14 +55,17 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 
 .middle {
   min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: 1fr auto;
   gap: 8px;
+  overflow: hidden;
 }
 
 .middle-scroll {
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 2px;
 }
 
@@ -112,10 +131,18 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .b-confirm { background: var(--green); }
 .b-neutral { background: var(--gray); }
 
-.right { padding: 8px; min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+.right {
+  padding: 8px;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
 .detail-scroll {
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--panel2);
   padding: 8px;
 }
