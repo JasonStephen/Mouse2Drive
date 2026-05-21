@@ -105,6 +105,11 @@ html, body {
 }
 
 .hotkey.capturing { border-color: #4da3ff; box-shadow: 0 0 0 1px #4da3ff inset; }
+.hotkey.conflict {
+  border-color: #d6b300;
+  box-shadow: 0 0 0 1px #d6b300 inset;
+  background: #3a3518;
+}
 
 .icon-btn {
   width: 24px;

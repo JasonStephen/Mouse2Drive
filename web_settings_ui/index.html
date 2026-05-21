@@ -12,7 +12,7 @@
       <div class="title">设置类型</div>
       <button id="tab-display" class="tab active" type="button">图像显示</button>
       <button id="tab-sense" class="tab" type="button">灵敏度</button>
-      <button id="tab-bind" class="tab" type="button">快捷键</button>
+      <button id="tab-bind" class="tab" type="button">热键&映射</button>
     </aside>
 
     <main class="middle">
@@ -64,7 +64,7 @@
         </section>
 
         <section id="page-bind" class="page hidden">
-          <div class="subttl">快捷键</div>
+          <div class="subttl">功能热键</div>
           <div class="row">
             <label id="lbl-toggle_hotkey" class="lbl">开关热键</label>
             <input id="toggle_hotkey" class="inp-hotkey hotkey" readonly />
@@ -85,6 +85,7 @@
           <input id="open_settings_hotkey" class="inp-hotkey hotkey" readonly />
           <button id="reset-open_settings_hotkey" class="icon-btn" title="重置" type="button">↺</button>
         </div>
+          <div class="subttl">鼠标快捷键</div>
           <div class="row">
             <label id="lbl-gas_mouse_button" class="lbl">油门控制</label>
             <select id="gas_mouse_button" class="sel">
@@ -115,6 +116,36 @@
             <button id="reset-brake_mouse_button" class="icon-btn" title="重置" type="button">↺</button>
             <button id="clear-brake_mouse_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
           </div>
+          <div class="row">
+            <label id="lbl-gear_up_mouse_button" class="lbl">升档</label>
+            <select id="gear_up_mouse_button" class="sel">
+              <option value="right">right</option>
+              <option value="left">left</option>
+              <option value="middle">middle</option>
+              <option value="x1">x1</option>
+              <option value="x2">x2</option>
+              <option value="wheel_up">wheel_up</option>
+              <option value="wheel_down">wheel_down</option>
+              <option value="none">none</option>
+            </select>
+            <button id="reset-gear_up_mouse_button" class="icon-btn" title="重置" type="button">↺</button>
+            <button id="clear-gear_up_mouse_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+          </div>
+          <div class="row">
+            <label id="lbl-gear_down_mouse_button" class="lbl">降档</label>
+            <select id="gear_down_mouse_button" class="sel">
+              <option value="right">right</option>
+              <option value="left">left</option>
+              <option value="middle">middle</option>
+              <option value="x1">x1</option>
+              <option value="x2">x2</option>
+              <option value="wheel_down">wheel_down</option>
+              <option value="wheel_up">wheel_up</option>
+              <option value="none">none</option>
+            </select>
+            <button id="reset-gear_down_mouse_button" class="icon-btn" title="重置" type="button">↺</button>
+            <button id="clear-gear_down_mouse_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
+          </div>
 
           <div class="subttl">映射</div>
           <div class="row">
@@ -133,6 +164,9 @@
               <option value="left_y">left_y</option>
               <option value="right_x">right_x</option>
               <option value="right_y">right_y</option>
+              <option value="left_trigger">left_trigger</option>
+              <option value="right_trigger">right_trigger</option>
+              <option value="none">none</option>
             </select>
             <button id="reset-steering_axis" class="icon-btn" title="重置" type="button">↺</button>
             <button id="clear-steering_axis" class="icon-btn danger" title="取消绑定" type="button">✕</button>
@@ -149,7 +183,7 @@
           </div>
           <div id="pedal-gamepad-group">
           <div class="row">
-            <label id="lbl-gas_output_button" class="lbl">油门映射（手柄）</label>
+            <label id="lbl-gas_output_button" class="lbl">油门映射</label>
             <select id="gas_output_button" class="sel">
               <option value="right_shoulder">right_shoulder</option>
               <option value="left_shoulder">left_shoulder</option>
@@ -172,7 +206,7 @@
             <button id="clear-gas_output_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
           </div>
           <div class="row">
-            <label id="lbl-brake_output_button" class="lbl">刹车映射（手柄）</label>
+            <label id="lbl-brake_output_button" class="lbl">刹车映射</label>
             <select id="brake_output_button" class="sel">
               <option value="left_shoulder">left_shoulder</option>
               <option value="right_shoulder">right_shoulder</option>
@@ -197,13 +231,13 @@
           </div>
           <div id="pedal-keyboard-group" class="hidden">
             <div class="row">
-              <label id="lbl-gas_key" class="lbl">油门（键盘）</label>
+              <label id="lbl-gas_key" class="lbl">油门</label>
               <input id="gas_key" class="inp-hotkey hotkey" readonly />
               <button id="reset-gas_key" class="icon-btn" title="重置" type="button">↺</button>
               <button id="clear-gas_key" class="icon-btn danger" title="取消绑定" type="button">✕</button>
             </div>
             <div class="row">
-              <label id="lbl-brake_key" class="lbl">刹车（键盘）</label>
+              <label id="lbl-brake_key" class="lbl">刹车</label>
               <input id="brake_key" class="inp-hotkey hotkey" readonly />
               <button id="reset-brake_key" class="icon-btn" title="重置" type="button">↺</button>
               <button id="clear-brake_key" class="icon-btn danger" title="取消绑定" type="button">✕</button>
@@ -222,7 +256,7 @@
 
           <div id="gear-gamepad-group">
             <div class="row">
-              <label id="lbl-gear_up_button" class="lbl">升档（手柄）</label>
+              <label id="lbl-gear_up_button" class="lbl">升档</label>
               <select id="gear_up_button" class="sel">
                 <option value="none">none</option>
                 <option value="right_shoulder">right_shoulder</option>
@@ -245,7 +279,7 @@
               <button id="clear-gear_up_button" class="icon-btn danger" title="取消绑定" type="button">✕</button>
             </div>
             <div class="row">
-              <label id="lbl-gear_down_button" class="lbl">降档（手柄）</label>
+              <label id="lbl-gear_down_button" class="lbl">降档</label>
               <select id="gear_down_button" class="sel">
                 <option value="none">none</option>
                 <option value="left_shoulder">left_shoulder</option>
@@ -271,13 +305,13 @@
 
           <div id="gear-keyboard-group" class="hidden">
             <div class="row">
-              <label id="lbl-gear_up_key" class="lbl">升档（键盘）</label>
+              <label id="lbl-gear_up_key" class="lbl">升档</label>
               <input id="gear_up_key" class="inp-hotkey hotkey" readonly />
               <button id="reset-gear_up_key" class="icon-btn" title="重置" type="button">↺</button>
               <button id="clear-gear_up_key" class="icon-btn danger" title="取消绑定" type="button">✕</button>
             </div>
             <div class="row">
-              <label id="lbl-gear_down_key" class="lbl">降档（键盘）</label>
+              <label id="lbl-gear_down_key" class="lbl">降档</label>
               <input id="gear_down_key" class="inp-hotkey hotkey" readonly />
               <button id="reset-gear_down_key" class="icon-btn" title="重置" type="button">↺</button>
               <button id="clear-gear_down_key" class="icon-btn danger" title="取消绑定" type="button">✕</button>
@@ -302,6 +336,7 @@
     </aside>
   </div>
 
+  <script src="./bootstrap_state.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

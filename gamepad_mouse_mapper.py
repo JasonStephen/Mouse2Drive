@@ -40,8 +40,10 @@ class AppConfig:
     fullscreen_mode: bool = False
     gas_mouse_button: str = "right"
     brake_mouse_button: str = "left"
-    gas_output_button: str = "right_shoulder"
-    brake_output_button: str = "left_shoulder"
+    gear_up_mouse_button: str = "wheel_up"
+    gear_down_mouse_button: str = "wheel_down"
+    gas_output_button: str = "right_trigger"
+    brake_output_button: str = "left_trigger"
     gas_brake_mapping_mode: str = "gamepad"
     gas_key: str = "w"
     brake_key: str = "s"
@@ -134,7 +136,42 @@ def resolve_gamepad_button(name: str):
         "dpad_left": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT,
         "dpad_right": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
     }
-    return mapping.get(n, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER)
+    return mapping.get(n, None)
+
+
+ALL_GAMEPAD_BUTTON_NAMES = [
+    "right_shoulder",
+    "left_shoulder",
+    "left_thumb",
+    "right_thumb",
+    "back",
+    "start",
+    "guide",
+    "a",
+    "b",
+    "x",
+    "y",
+    "dpad_up",
+    "dpad_down",
+    "dpad_left",
+    "dpad_right",
+    "none",
+]
+
+GAMEPAD_STICK_SIGNAL_NAMES = [
+    "left_stick_left",
+    "left_stick_right",
+    "left_stick_up",
+    "left_stick_down",
+    "right_stick_left",
+    "right_stick_right",
+    "right_stick_up",
+    "right_stick_down",
+    "left_trigger",
+    "right_trigger",
+]
+
+ALL_GAMEPAD_BINDING_NAMES = ALL_GAMEPAD_BUTTON_NAMES[:-1] + GAMEPAD_STICK_SIGNAL_NAMES + ["none"]
 
 
 def resolve_keyboard_key(name: str):
@@ -334,6 +371,8 @@ def load_config() -> AppConfig:
         cfg.fullscreen_mode = parser.getboolean(section, "fullscreen_mode", fallback=cfg.fullscreen_mode)
         cfg.gas_mouse_button = parser.get(section, "gas_mouse_button", fallback=cfg.gas_mouse_button)
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
+        cfg.gear_up_mouse_button = parser.get(section, "gear_up_mouse_button", fallback=cfg.gear_up_mouse_button)
+        cfg.gear_down_mouse_button = parser.get(section, "gear_down_mouse_button", fallback=cfg.gear_down_mouse_button)
         cfg.gear_up_button = parser.get(section, "gear_up_button", fallback=cfg.gear_up_button)
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
         cfg.gas_output_button = parser.get(section, "gas_output_button", fallback=cfg.gas_output_button)
@@ -351,7 +390,7 @@ def load_config() -> AppConfig:
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
-    if cfg.steering_axis not in {"left_x", "left_y", "right_x", "right_y", "none"}:
+    if cfg.steering_axis not in {"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"}:
         cfg.steering_axis = "left_x"
     cfg.reference_range_x_px = max(1.0, cfg.reference_range_x_px)
     cfg.reference_range_y_px = max(1.0, cfg.reference_range_y_px)
@@ -368,6 +407,18 @@ def load_config() -> AppConfig:
         cfg.gear_mapping_mode = "gamepad"
     if cfg.gas_brake_mapping_mode not in {"gamepad", "keyboard", "none"}:
         cfg.gas_brake_mapping_mode = "gamepad"
+    if cfg.gas_output_button not in ALL_GAMEPAD_BINDING_NAMES:
+        cfg.gas_output_button = "right_trigger"
+    if cfg.brake_output_button not in ALL_GAMEPAD_BINDING_NAMES:
+        cfg.brake_output_button = "left_trigger"
+    # Legacy default migration: shoulder buttons often conflict with camera in racing games.
+    if cfg.gas_output_button == "right_shoulder" and cfg.brake_output_button == "left_shoulder":
+        cfg.gas_output_button = "right_trigger"
+        cfg.brake_output_button = "left_trigger"
+    if cfg.gear_up_button not in ALL_GAMEPAD_BINDING_NAMES:
+        cfg.gear_up_button = "right_thumb"
+    if cfg.gear_down_button not in ALL_GAMEPAD_BINDING_NAMES:
+        cfg.gear_down_button = "left_thumb"
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 1.5)
     cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 1.5)
     cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 0.95)
@@ -394,6 +445,8 @@ def save_default_config(cfg: AppConfig) -> None:
         "fullscreen_mode": str(cfg.fullscreen_mode).lower(),
         "gas_mouse_button": cfg.gas_mouse_button,
         "brake_mouse_button": cfg.brake_mouse_button,
+        "gear_up_mouse_button": cfg.gear_up_mouse_button,
+        "gear_down_mouse_button": cfg.gear_down_mouse_button,
         "gear_up_button": cfg.gear_up_button,
         "gear_down_button": cfg.gear_down_button,
         "gas_output_button": cfg.gas_output_button,
@@ -1111,6 +1164,7 @@ class MouseToVirtualGamepad:
     def __init__(self) -> None:
         self.config = load_config()
         self.state = MapperState()
+        self._sanitize_pedal_output_bindings()
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
 
@@ -1132,6 +1186,8 @@ class MouseToVirtualGamepad:
         self.toggle_fullscreen_combo = parse_hotkey_combo(self.config.toggle_fullscreen_hotkey)
         self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
+        self.gear_up_mouse_btn = resolve_mouse_button(self.config.gear_up_mouse_button)
+        self.gear_down_mouse_btn = resolve_mouse_button(self.config.gear_down_mouse_button)
         self.gas_output_btn = resolve_gamepad_button(self.config.gas_output_button)
         self.brake_output_btn = resolve_gamepad_button(self.config.brake_output_button)
         self.gas_key_combo = resolve_keyboard_combo(self.config.gas_key)
@@ -1166,6 +1222,17 @@ class MouseToVirtualGamepad:
             self.pad = None
             self.state.last_error = f"虚拟手柄创建失败: {exc}"
 
+    def _sanitize_pedal_output_bindings(self) -> None:
+        changed = False
+        if self.config.gas_output_button == "right_shoulder":
+            self.config.gas_output_button = "right_trigger"
+            changed = True
+        if self.config.brake_output_button == "left_shoulder":
+            self.config.brake_output_button = "left_trigger"
+            changed = True
+        if changed:
+            self.state.last_error = "检测到油刹映射与视角键冲突，已自动改为 RT/LT"
+
     def get_runtime_settings(self) -> dict:
         return {
             "hud_fps": self.config.hud_fps,
@@ -1178,6 +1245,8 @@ class MouseToVirtualGamepad:
             "fullscreen_mode": self.hud_fullscreen_enabled,
             "gas_mouse_button": self.config.gas_mouse_button,
             "brake_mouse_button": self.config.brake_mouse_button,
+            "gear_up_mouse_button": self.config.gear_up_mouse_button,
+            "gear_down_mouse_button": self.config.gear_down_mouse_button,
             "gas_output_button": self.config.gas_output_button,
             "brake_output_button": self.config.brake_output_button,
             "gas_brake_mapping_mode": self.config.gas_brake_mapping_mode,
@@ -1207,7 +1276,7 @@ class MouseToVirtualGamepad:
             control_mode = self.config.control_mode
         self.config.control_mode = int(clamp(control_mode, 1, 4))
         steering_axis = str(values.get("steering_axis", self.config.steering_axis)).strip().lower()
-        if steering_axis in {"left_x", "left_y", "right_x", "right_y", "none"}:
+        if steering_axis in {"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"}:
             self.config.steering_axis = steering_axis
         self.config.toggle_hotkey = str(values.get("toggle_hotkey", self.config.toggle_hotkey)).strip() or "shift+v"
         self.config.switch_mode_hotkey = str(values.get("switch_mode_hotkey", self.config.switch_mode_hotkey)).strip() or "alt+shift+v"
@@ -1216,8 +1285,10 @@ class MouseToVirtualGamepad:
         self.config.fullscreen_mode = bool(values.get("fullscreen_mode", self.config.fullscreen_mode))
         self.config.gas_mouse_button = str(values.get("gas_mouse_button", self.config.gas_mouse_button)).strip().lower() or "right"
         self.config.brake_mouse_button = str(values.get("brake_mouse_button", self.config.brake_mouse_button)).strip().lower() or "left"
-        self.config.gas_output_button = str(values.get("gas_output_button", self.config.gas_output_button)).strip().lower() or "right_shoulder"
-        self.config.brake_output_button = str(values.get("brake_output_button", self.config.brake_output_button)).strip().lower() or "left_shoulder"
+        self.config.gear_up_mouse_button = str(values.get("gear_up_mouse_button", self.config.gear_up_mouse_button)).strip().lower() or "wheel_up"
+        self.config.gear_down_mouse_button = str(values.get("gear_down_mouse_button", self.config.gear_down_mouse_button)).strip().lower() or "wheel_down"
+        self.config.gas_output_button = str(values.get("gas_output_button", self.config.gas_output_button)).strip().lower() or "right_trigger"
+        self.config.brake_output_button = str(values.get("brake_output_button", self.config.brake_output_button)).strip().lower() or "left_trigger"
         pedal_mode = str(values.get("gas_brake_mapping_mode", self.config.gas_brake_mapping_mode)).strip().lower()
         self.config.gas_brake_mapping_mode = pedal_mode if pedal_mode in {"gamepad", "keyboard", "none"} else "gamepad"
         self.config.gas_key = str(values.get("gas_key", self.config.gas_key)).strip().lower() or "w"
@@ -1228,6 +1299,7 @@ class MouseToVirtualGamepad:
         self.config.gear_down_button = str(values.get("gear_down_button", self.config.gear_down_button)).strip().lower() or "left_thumb"
         self.config.gear_up_key = str(values.get("gear_up_key", self.config.gear_up_key)).strip().lower() or "e"
         self.config.gear_down_key = str(values.get("gear_down_key", self.config.gear_down_key)).strip().lower() or "q"
+        self._sanitize_pedal_output_bindings()
         try:
             pulse = int(values.get("gear_pulse_ms", self.config.gear_pulse_ms))
         except Exception:
@@ -1243,6 +1315,8 @@ class MouseToVirtualGamepad:
         self.open_settings_combo = parse_hotkey_combo(self.config.open_settings_hotkey)
         self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
+        self.gear_up_mouse_btn = resolve_mouse_button(self.config.gear_up_mouse_button)
+        self.gear_down_mouse_btn = resolve_mouse_button(self.config.gear_down_mouse_button)
         self.gas_output_btn = resolve_gamepad_button(self.config.gas_output_button)
         self.brake_output_btn = resolve_gamepad_button(self.config.brake_output_button)
         self.gas_key_combo = resolve_keyboard_combo(self.config.gas_key)
@@ -1445,6 +1519,17 @@ class MouseToVirtualGamepad:
             self.right_button_down = pressed
         elif self.brake_mouse_btn is not None and button == self.brake_mouse_btn:
             self.left_button_down = pressed
+        if not self.state.enabled:
+            return
+        if not pressed:
+            return
+        now = time.time()
+        pulse = self.config.gear_pulse_ms / 1000.0
+        if self.config.gear_mapping_mode == "gamepad":
+            if self.gear_up_mouse_btn is not None and button == self.gear_up_mouse_btn:
+                self.gear_up_until = max(self.gear_up_until, now + pulse)
+            if self.gear_down_mouse_btn is not None and button == self.gear_down_mouse_btn:
+                self.gear_down_until = max(self.gear_down_until, now + pulse)
 
     def on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
         if not self.state.enabled:
@@ -1460,9 +1545,13 @@ class MouseToVirtualGamepad:
         if self.config.brake_mouse_button == "wheel_down" and dy < 0:
             self.brake_scroll_until = max(self.brake_scroll_until, now + pulse)
         if self.config.gear_mapping_mode == "gamepad":
-            if dy > 0:
+            if self.config.gear_up_mouse_button == "wheel_up" and dy > 0:
                 self.gear_up_until = max(self.gear_up_until, now + pulse)
-            elif dy < 0:
+            if self.config.gear_up_mouse_button == "wheel_down" and dy < 0:
+                self.gear_up_until = max(self.gear_up_until, now + pulse)
+            if self.config.gear_down_mouse_button == "wheel_up" and dy > 0:
+                self.gear_down_until = max(self.gear_down_until, now + pulse)
+            if self.config.gear_down_mouse_button == "wheel_down" and dy < 0:
                 self.gear_down_until = max(self.gear_down_until, now + pulse)
 
     def compute_state(self) -> None:
@@ -1530,6 +1619,42 @@ class MouseToVirtualGamepad:
             f"lx={self.state.left_x:+.3f} rt={self.state.rt:.3f} lt={self.state.lt:.3f}"
         )
 
+    def _apply_signal_binding(
+        self,
+        binding: str,
+        active: bool,
+        lx: int,
+        ly: int,
+        rx: int,
+        ry: int,
+        lt: int,
+        rt: int,
+    ) -> tuple[int, int, int, int, int, int]:
+        if not active or not binding or binding == "none":
+            return lx, ly, rx, ry, lt, rt
+        value = 32767
+        if binding == "left_stick_left":
+            lx = min(lx, -value)
+        elif binding == "left_stick_right":
+            lx = max(lx, value)
+        elif binding == "left_stick_up":
+            ly = max(ly, value)
+        elif binding == "left_stick_down":
+            ly = min(ly, -value)
+        elif binding == "right_stick_left":
+            rx = min(rx, -value)
+        elif binding == "right_stick_right":
+            rx = max(rx, value)
+        elif binding == "right_stick_up":
+            ry = max(ry, value)
+        elif binding == "right_stick_down":
+            ry = min(ry, -value)
+        elif binding == "left_trigger":
+            lt = 255
+        elif binding == "right_trigger":
+            rt = 255
+        return lx, ly, rx, ry, lt, rt
+
     def push_to_gamepad(self) -> None:
         steer = to_xinput_short(self.state.left_x)
         lx = 0
@@ -1546,57 +1671,74 @@ class MouseToVirtualGamepad:
             ry = steer
         rt = int(clamp(self.state.rt, 0.0, 1.0) * 255)
         lt = int(clamp(self.state.lt, 0.0, 1.0) * 255)
+        steer_trigger = int(clamp(abs(self.state.left_x), 0.0, 1.0) * 255)
+        if self.config.steering_axis == "right_trigger":
+            rt = max(rt, steer_trigger)
+        elif self.config.steering_axis == "left_trigger":
+            lt = max(lt, steer_trigger)
         now = time.time()
         gear_up_pressed = now < self.gear_up_until
         gear_down_pressed = now < self.gear_down_until
 
-        if self.pad is not None:
-            self.pad.left_joystick(x_value=lx, y_value=ly)
-            self.pad.right_joystick(x_value=rx, y_value=ry)
-            self.pad.right_trigger(value=rt)
-            self.pad.left_trigger(value=lt)
         if self.config.gas_brake_mapping_mode == "keyboard":
             self._update_keyboard_pedal_state(self.state.gas_active, self.state.brake_active)
             if self.pad is not None:
-                if self.gas_output_btn is not None:
+                if self.config.gas_output_button in GAMEPAD_STICK_SIGNAL_NAMES:
+                    pass
+                elif self.gas_output_btn is not None:
                     self.pad.release_button(button=self.gas_output_btn)
-                if self.brake_output_btn is not None:
+                if self.config.brake_output_button in GAMEPAD_STICK_SIGNAL_NAMES:
+                    pass
+                elif self.brake_output_btn is not None:
                     self.pad.release_button(button=self.brake_output_btn)
         elif self.config.gas_brake_mapping_mode == "none":
             self._update_keyboard_pedal_state(False, False)
             if self.pad is not None:
-                if self.gas_output_btn is not None:
+                if self.config.gas_output_button in GAMEPAD_STICK_SIGNAL_NAMES:
+                    pass
+                elif self.gas_output_btn is not None:
                     self.pad.release_button(button=self.gas_output_btn)
-                if self.brake_output_btn is not None:
+                if self.config.brake_output_button in GAMEPAD_STICK_SIGNAL_NAMES:
+                    pass
+                elif self.brake_output_btn is not None:
                     self.pad.release_button(button=self.brake_output_btn)
         else:
             self._update_keyboard_pedal_state(False, False)
             if self.pad is not None:
-                if self.gas_output_btn is not None:
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gas_output_button, self.state.gas_active, lx, ly, rx, ry, lt, rt)
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.brake_output_button, self.state.brake_active, lx, ly, rx, ry, lt, rt)
+                if self.config.gas_output_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gas_output_btn is not None:
                     self.pad.press_button(button=self.gas_output_btn) if self.state.gas_active else self.pad.release_button(button=self.gas_output_btn)
-                if self.brake_output_btn is not None:
+                if self.config.brake_output_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.brake_output_btn is not None:
                     self.pad.press_button(button=self.brake_output_btn) if self.state.brake_active else self.pad.release_button(button=self.brake_output_btn)
         if self.config.gear_mapping_mode == "keyboard":
             if self.pad is not None:
-                if self.gear_up_btn is not None:
+                if self.config.gear_up_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_up_btn is not None:
                     self.pad.release_button(button=self.gear_up_btn)
-                if self.gear_down_btn is not None:
+                if self.config.gear_down_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_down_btn is not None:
                     self.pad.release_button(button=self.gear_down_btn)
             self._update_keyboard_shift_state(gear_up_pressed, gear_down_pressed)
         elif self.config.gear_mapping_mode == "none":
             self._update_keyboard_shift_state(False, False)
             if self.pad is not None:
-                if self.gear_up_btn is not None:
+                if self.config.gear_up_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_up_btn is not None:
                     self.pad.release_button(button=self.gear_up_btn)
-                if self.gear_down_btn is not None:
+                if self.config.gear_down_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_down_btn is not None:
                     self.pad.release_button(button=self.gear_down_btn)
         else:
             self._update_keyboard_shift_state(False, False)
             if self.pad is not None:
-                if self.gear_up_btn is not None:
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gear_up_button, gear_up_pressed, lx, ly, rx, ry, lt, rt)
+                lx, ly, rx, ry, lt, rt = self._apply_signal_binding(self.config.gear_down_button, gear_down_pressed, lx, ly, rx, ry, lt, rt)
+                if self.config.gear_up_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_up_btn is not None:
                     self.pad.press_button(button=self.gear_up_btn) if gear_up_pressed else self.pad.release_button(button=self.gear_up_btn)
-                if self.gear_down_btn is not None:
+                if self.config.gear_down_button not in GAMEPAD_STICK_SIGNAL_NAMES and self.gear_down_btn is not None:
                     self.pad.press_button(button=self.gear_down_btn) if gear_down_pressed else self.pad.release_button(button=self.gear_down_btn)
+        if self.pad is not None:
+            self.pad.left_joystick(x_value=lx, y_value=ly)
+            self.pad.right_joystick(x_value=rx, y_value=ry)
+            self.pad.right_trigger(value=rt)
+            self.pad.left_trigger(value=lt)
         if self.pad is not None:
             self.pad.update()
 

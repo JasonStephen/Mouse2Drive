@@ -47,7 +47,11 @@ def main():
     with open(args.state_file, "r", encoding="utf-8") as f:
         state = json.load(f)
     api = Api(args.ipc, state)
-    ui_path = (Path(__file__).parent / "web_settings_ui" / "index.html").resolve()
+    ui_dir = (Path(__file__).parent / "web_settings_ui").resolve()
+    ui_path = (ui_dir / "index.html").resolve()
+    bootstrap_path = ui_dir / "bootstrap_state.js"
+    bootstrap_text = "window.__BOOTSTRAP_STATE__ = " + json.dumps(state, ensure_ascii=False) + ";"
+    bootstrap_path.write_text(bootstrap_text, encoding="utf-8")
     window = webview.create_window("设置", ui_path.as_uri(), js_api=api, width=760, height=420, min_size=(720, 420), resizable=True)
     api.set_window(window)
     webview.start()
