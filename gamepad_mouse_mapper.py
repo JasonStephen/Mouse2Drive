@@ -19,6 +19,8 @@ from pynput import keyboard, mouse
 CONFIG_PATH = Path(__file__).with_name("config.cfg")
 SETTINGS_DEFAULTS_PATH = Path(__file__).with_name("settings_defaults.cfg")
 SETTINGS_OPTIONS_PATH = Path(__file__).with_name("settings_options.cfg")
+I18N_ZH_PATH = Path(__file__).with_name("i18n_zh-CN.cfg")
+I18N_EN_PATH = Path(__file__).with_name("i18n_en-US.cfg")
 POLL_INTERVAL = 0.01
 HUD_FPS_OPTIONS = (15, 30, 60, 90, 120)
 ICON_FONT_FAMILY = "Segoe MDL2 Assets"
@@ -29,6 +31,7 @@ ICON_UNLOCK = "\uE785"
 
 @dataclass
 class AppConfig:
+    language: str = "zh-CN"
     control_mode: int = 1
     mode_direction_enable: bool = True
     mode_linear_pedal_enable: bool = True
@@ -82,6 +85,33 @@ class MapperState:
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+def _parse_i18n_file(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            key = k.strip()
+            if key:
+                result[key] = v.strip()
+    except Exception:
+        pass
+    return result
+
+
+def load_i18n(language: str) -> dict[str, str]:
+    lang = str(language or "zh-CN").strip()
+    base = _parse_i18n_file(I18N_EN_PATH)
+    zh = _parse_i18n_file(I18N_ZH_PATH)
+    if lang == "zh-CN":
+        merged = dict(base)
+        merged.update(zh)
+        return merged
+    return base
 
 
 def control_mode_to_flags(mode: int) -> tuple[bool, bool, bool]:
@@ -387,6 +417,7 @@ def load_config() -> AppConfig:
     section = "mapping"
 
     if parser.has_section(section):
+        cfg.language = parser.get(section, "language", fallback=cfg.language)
         cfg.control_mode = parser.getint(section, "control_mode", fallback=cfg.control_mode)
         cfg.mode_direction_enable = parser.getboolean(section, "mode_direction_enable", fallback=cfg.mode_direction_enable)
         cfg.mode_linear_pedal_enable = parser.getboolean(section, "mode_linear_pedal_enable", fallback=cfg.mode_linear_pedal_enable)
@@ -481,12 +512,15 @@ def load_config() -> AppConfig:
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 1.5)
     cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 1.5)
     cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 1.0)
+    if cfg.language not in {"zh-CN", "en-US"}:
+        cfg.language = "zh-CN"
     return cfg
 
 
 def save_default_config(cfg: AppConfig) -> None:
     parser = configparser.ConfigParser()
     parser["mapping"] = {
+        "language": cfg.language,
         "control_mode": str(cfg.control_mode),
         "mode_direction_enable": str(cfg.mode_direction_enable).lower(),
         "mode_linear_pedal_enable": str(cfg.mode_linear_pedal_enable).lower(),
@@ -573,6 +607,7 @@ def load_settings_defaults() -> dict:
     parser = configparser.ConfigParser()
     result = {
         "hud_fps": 60,
+        "language": "zh-CN",
         "fullscreen_mode": False,
         "window_scale": 1.0,
         "fullscreen_scale": 1.0,
@@ -614,7 +649,7 @@ def load_settings_defaults() -> dict:
             parser.read(SETTINGS_DEFAULTS_PATH, encoding="utf-8-sig")
             sec = "defaults"
             if parser.has_section(sec):
-                for k in ("toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"):
+                for k in ("language", "toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"):
                     result[k] = parser.get(sec, k, fallback=str(result[k]))
                 for k in ("hud_fps", "gear_pulse_ms", "control_mode"):
                     result[k] = parser.getint(sec, k, fallback=int(result[k]))
@@ -632,6 +667,7 @@ def load_settings_defaults() -> dict:
 
 def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
     cfg.hud_fps = int(defaults.get("hud_fps", cfg.hud_fps))
+    cfg.language = str(defaults.get("language", cfg.language))
     cfg.fullscreen_mode = bool(defaults.get("fullscreen_mode", cfg.fullscreen_mode))
     cfg.windows_scale = float(defaults.get("window_scale", cfg.windows_scale))
     cfg.fullscreen_scale = float(defaults.get("fullscreen_scale", cfg.fullscreen_scale))
@@ -691,6 +727,8 @@ class Indicator:
         windows_scale: float = 1.0,
         fullscreen_scale: float = 1.0,
         fullscreen_alpha: float = 0.5,
+        language: str = "zh-CN",
+        i18n_map: dict[str, str] | None = None,
         settings_getter=None,
         settings_apply_callback=None,
         settings_open_callback=None,
@@ -702,6 +740,8 @@ class Indicator:
         self.window_scale = clamp(windows_scale, 0.8, 1.5)
         self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 1.5)
         self.fullscreen_alpha = clamp(fullscreen_alpha, 0.0, 1.0)
+        self.language = language if language in {"zh-CN", "en-US"} else "zh-CN"
+        self.i18n = dict(i18n_map or {})
         self.ui_scale = max(1.15, self.window_scale * 1.15)
         self.settings_getter = settings_getter
         self.settings_apply_callback = settings_apply_callback
@@ -744,7 +784,7 @@ class Indicator:
         self.drag_start_win_x = 0
         self.drag_start_win_y = 0
         self.root = tk.Tk()
-        self.root.title("Mouse -> Virtual Gamepad")
+        self.root.title(self._t("app.window.title", "Mouse -> Virtual Gamepad"))
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
@@ -753,7 +793,7 @@ class Indicator:
         self.frame.pack(fill="both", expand=True)
         self.header = tk.Frame(self.frame, bg="#1f1f1f")
         self.header.pack(fill="x")
-        self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(14), "bold"), anchor="w")
+        self.status_label = tk.Label(self.header, text=self._t("app.status.off", "Status: OFF"), fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(14), "bold"), anchor="w")
         self.status_label.pack(side="left", fill="x", expand=True)
         self.lock_button = tk.Button(self.header, text=ICON_LOCK, width=2, command=self.toggle_lock, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=(ICON_FONT_FAMILY, self._font(10), "normal"))
         self.lock_button.pack(side="right")
@@ -775,6 +815,12 @@ class Indicator:
         self.apply_view_mode(False)
         self._init_scene()
         self.root.after(250, self._poll_settings_ipc)
+
+    def _t(self, key: str, fallback: str) -> str:
+        val = self.i18n.get(key)
+        if val is None or str(val).strip() == "":
+            return fallback
+        return str(val)
 
     def position_bottom_right(self) -> None:
         self.root.update_idletasks()
@@ -944,11 +990,11 @@ class Indicator:
         cx = x(190)
         c.create_line(cx, y(8), cx, y(26), fill="#9e9e9e", width=max(1, int(round(2 * s))))
         self.scene["lx_fill"] = c.create_rectangle(cx, y(11), cx, y(23), outline="", fill="#67b7ff")
-        c.create_text(x(34), y(68), text="刹车", fill="#ffcdd2", font=("Segoe UI", self._font(9)))
+        c.create_text(x(34), y(68), text=self._t("app.label.brake", "刹车"), fill="#ffcdd2", font=("Segoe UI", self._font(9)))
         self.scene["brake_track"] = c.create_rectangle(x(60), y(60), x(150), y(74), outline="#8a8a8a", fill="#2a2a2a")
         self.scene["brake_fill"] = c.create_rectangle(x(61), y(61), x(61), y(73), outline="", fill="#ff6b6b")
         self.scene["brake_box"] = c.create_rectangle(x(154), y(60), x(166), y(74), outline="#8a8a8a", fill="#2a2a2a")
-        c.create_text(x(222), y(68), text="油门", fill="#c8e6c9", font=("Segoe UI", self._font(9)))
+        c.create_text(x(222), y(68), text=self._t("app.label.gas", "油门"), fill="#c8e6c9", font=("Segoe UI", self._font(9)))
         self.scene["gas_track"] = c.create_rectangle(x(248), y(60), x(338), y(74), outline="#8a8a8a", fill="#2a2a2a")
         self.scene["gas_fill"] = c.create_rectangle(x(249), y(61), x(249), y(73), outline="", fill="#37d45c")
         self.scene["gas_box"] = c.create_rectangle(x(342), y(60), x(354), y(74), outline="#8a8a8a", fill="#2a2a2a")
@@ -961,7 +1007,7 @@ class Indicator:
         c.configure(width=sw, height=sh)
         c.configure(bg=self.fullscreen_bg_key, highlightthickness=0, bd=0)
         # HUD text anchors
-        self.scene["status_text"] = c.create_text(28, 28, text="状态: OFF", fill="#ffffff", font=("Segoe UI", self._font(24), "bold"), anchor="nw")
+        self.scene["status_text"] = c.create_text(28, 28, text=self._t("app.status.off", "Status: OFF"), fill="#ffffff", font=("Segoe UI", self._font(24), "bold"), anchor="nw")
         self.scene["error_text"] = c.create_text(28, sh - 28, text="", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="sw")
         self.scene["debug_text"] = c.create_text(28, sh - 28 - self._font(16) - 10, text="", fill="#d6f0ff", font=("Consolas", self._font(12)), anchor="sw")
         # Fullscreen top-right icons: settings + lock
@@ -1017,8 +1063,8 @@ class Indicator:
         self.scene["brake_fill"] = c.create_rectangle(bx + 1 + brake_ox, bars_y1 - 1 + brake_oy, bx + bar_w - 1 + brake_ox, bars_y1 - 1 + brake_oy, outline="", fill="#ff6b6b")
         self.scene["gas_track"] = c.create_rectangle(gx + gas_ox, bars_y0 + gas_oy, gx + bar_w + gas_ox, bars_y1 + gas_oy, outline="#c7c7c7", fill="#000000", stipple=fs_stipple)
         self.scene["gas_fill"] = c.create_rectangle(gx + 1 + gas_ox, bars_y1 - 1 + gas_oy, gx + bar_w - 1 + gas_ox, bars_y1 - 1 + gas_oy, outline="", fill="#37d45c")
-        c.create_text(bx + bar_w // 2 + brake_ox, bars_y1 + 36 + brake_oy, text="刹车", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
-        c.create_text(gx + bar_w // 2 + gas_ox, bars_y1 + 36 + gas_oy, text="油门", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
+        c.create_text(bx + bar_w // 2 + brake_ox, bars_y1 + 36 + brake_oy, text=self._t("app.label.brake", "刹车"), fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
+        c.create_text(gx + bar_w // 2 + gas_ox, bars_y1 + 36 + gas_oy, text=self._t("app.label.gas", "油门"), fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
         self.scene["brake_box"] = c.create_rectangle(bx - 22 + brake_ox, bars_y0 + brake_oy, bx - 8 + brake_ox, bars_y0 + 14 + brake_oy, outline="#c7c7c7", fill="")
         self.scene["gas_box"] = c.create_rectangle(gx + bar_w + 8 + gas_ox, bars_y0 + gas_oy, gx + bar_w + 22 + gas_ox, bars_y0 + 14 + gas_oy, outline="#c7c7c7", fill="")
         self.fs_lx_bounds = (
@@ -1130,6 +1176,7 @@ class Indicator:
         if callable(self.settings_getter):
             return dict(self.settings_getter())
         return {
+            "language": self.language,
             "hud_fps": self.hud_fps,
             "window_scale": self.window_scale,
             "fullscreen_scale": self.fullscreen_scale,
@@ -1141,13 +1188,13 @@ class Indicator:
         self._settings_debug_log("open_settings_panel called")
         if self.settings_webview_proc is not None and self.settings_webview_proc.poll() is None:
             self._settings_debug_log("webview already running")
-            self.local_error_text = "设置窗口已在运行"
+            self.local_error_text = self._t("app.error.settings_window_running", "设置窗口已在运行")
             return
         baseline = self._get_live_settings()
         self._settings_debug_log(f"baseline={baseline}")
         script_path = Path(__file__).with_name("settings_webview.py")
         if not script_path.exists():
-            self.local_error_text = "未找到 settings_webview.py"
+            self.local_error_text = self._t("app.error.settings_script_missing", "未找到 settings_webview.py")
             self._settings_debug_log("settings_webview.py missing")
             return
         try:
@@ -1164,12 +1211,12 @@ class Indicator:
                 [sys.executable, str(script_path), "--ipc", self.settings_ipc_path, "--state-file", self.settings_state_path],
                 cwd=str(Path(__file__).parent),
             )
-            self.local_error_text = f"设置窗口启动中 pid={self.settings_webview_proc.pid}"
+            self.local_error_text = f"{self._t('app.error.settings_window_starting', '设置窗口启动中')} pid={self.settings_webview_proc.pid}"
             if callable(self.settings_open_callback):
                 self.settings_open_callback(True)
             self.root.after(900, self._check_settings_webview_started)
         except Exception as exc:
-            self.local_error_text = f"打开Web设置窗口失败: {exc}"
+            self.local_error_text = f"{self._t('app.error.settings_window_open_fail', '打开Web设置窗口失败')}: {exc}"
             self._settings_debug_log(f"subprocess start failed: {exc}")
 
     def _settings_debug_log(self, msg: str) -> None:
@@ -1184,12 +1231,12 @@ class Indicator:
         try:
             p = self.settings_webview_proc
             if p is None:
-                self.local_error_text = "设置窗口未启动(进程对象为空)"
+                self.local_error_text = self._t("app.error.settings_window_process_empty", "设置窗口未启动(进程对象为空)")
                 self._settings_debug_log("check: process is None")
                 return
             rc = p.poll()
             if rc is None:
-                self.local_error_text = f"设置窗口运行中 pid={p.pid}"
+                self.local_error_text = f"{self._t('app.error.settings_window_running', '设置窗口已在运行')} pid={p.pid}"
                 self._settings_debug_log(f"check: running pid={p.pid}")
                 return
             if callable(self.settings_open_callback):
@@ -1202,9 +1249,9 @@ class Indicator:
                 tail = data[-240:].replace("\n", " | ")
             except Exception:
                 pass
-            self.local_error_text = f"设置窗口启动失败 rc={rc} 日志:{tail}"
+            self.local_error_text = f"{self._t('app.error.settings_window_start_fail', '设置窗口启动失败')} rc={rc} log:{tail}"
         except Exception as exc:
-            self.local_error_text = f"检查设置窗口状态失败: {exc}"
+            self.local_error_text = f"{self._t('app.error.settings_window_check_fail', '检查设置窗口状态失败')}: {exc}"
 
     def _apply_settings_values(self, values: dict, save_to_file: bool) -> None:
         try:
@@ -1213,12 +1260,16 @@ class Indicator:
             requested_fps = self.hud_fps
         self.hud_fps = requested_fps if requested_fps in current_hud_fps_options() else 60
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
+        lang = str(values.get("language", self.language)).strip()
+        self.language = lang if lang in {"zh-CN", "en-US"} else "zh-CN"
+        self.i18n = load_i18n(self.language)
         self.window_scale = clamp(float(values["window_scale"]), 0.8, 1.5)
         self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 1.5)
         self.fullscreen_alpha = clamp(float(values.get("fullscreen_alpha", self.fullscreen_alpha)), 0.0, 1.0)
         self.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         if callable(self.settings_apply_callback):
             self.settings_apply_callback(dict(values), save_to_file)
+        self.root.title(self._t("app.window.title", "Mouse -> Virtual Gamepad"))
         self._apply_ui_scale()
         self._init_scene()
         if not self.fullscreen_mode:
@@ -1360,7 +1411,7 @@ class Indicator:
     ) -> None:
         self.set_fullscreen_rect(fullscreen_rect)
         self.apply_view_mode(fullscreen_enabled)
-        self.status_label.config(text="状态: ON" if state.enabled else "状态: OFF", fg="#7dff9b" if state.enabled else "#ff6b6b")
+        self.status_label.config(text=(self._t("app.status.on", "Status: ON") if state.enabled else self._t("app.status.off", "Status: OFF")), fg="#7dff9b" if state.enabled else "#ff6b6b")
         self._draw_lx(state.left_x)
         self._draw_pedals(state.gas_active, state.brake_active, state.rt, state.lt)
         shown_error = self.local_error_text if self.local_error_text else state.last_error
@@ -1370,7 +1421,7 @@ class Indicator:
         else:
             self.debug_label.config(text="")
         if self.fullscreen_mode:
-            self.canvas.itemconfig(self.scene["status_text"], text=("状态: ON" if state.enabled else "状态: OFF"), fill=("#7dff9b" if state.enabled else "#ff6b6b"))
+            self.canvas.itemconfig(self.scene["status_text"], text=(self._t("app.status.on", "Status: ON") if state.enabled else self._t("app.status.off", "Status: OFF")), fill=("#7dff9b" if state.enabled else "#ff6b6b"))
             self.canvas.itemconfig(self.scene["error_text"], text=shown_error)
             self.canvas.itemconfig(self.scene["debug_text"], text=(state.debug_text if self.debug_mode else ""))
     def loop(
@@ -1409,6 +1460,7 @@ class Indicator:
 class MouseToVirtualGamepad:
     def __init__(self) -> None:
         self.config = load_config()
+        self.i18n = load_i18n(self.config.language)
         self.state = MapperState()
         self._sanitize_pedal_output_bindings()
         self.stop_event = threading.Event()
@@ -1464,10 +1516,16 @@ class MouseToVirtualGamepad:
 
         try:
             self.pad = vg.VX360Gamepad()
-            self.state.last_error = "虚拟手柄已创建"
+            self.state.last_error = ""
         except Exception as exc:
             self.pad = None
-            self.state.last_error = f"虚拟手柄创建失败: {exc}"
+            self.state.last_error = f"{self._t('app.error.gamepad_create_fail', '虚拟手柄创建失败')}: {exc}"
+
+    def _t(self, key: str, fallback: str) -> str:
+        val = self.i18n.get(key)
+        if val is None or str(val).strip() == "":
+            return fallback
+        return str(val)
 
     def _sanitize_pedal_output_bindings(self) -> None:
         changed = False
@@ -1478,13 +1536,14 @@ class MouseToVirtualGamepad:
             self.config.brake_output_button = "left_trigger"
             changed = True
         if changed:
-            self.state.last_error = "检测到油刹映射与视角键冲突，已自动改为 RT/LT"
+            self.state.last_error = self._t("app.error.pedal_conflict", "Pedal mapping conflicted with camera keys, auto-switched to RT/LT")
 
     def _dbg(self, msg: str) -> None:
         return
 
     def get_runtime_settings(self) -> dict:
         return {
+            "language": self.config.language,
             "hud_fps": self.config.hud_fps,
             "control_mode": self.config.control_mode,
             "mode_direction_enable": self.config.mode_direction_enable,
@@ -1526,6 +1585,9 @@ class MouseToVirtualGamepad:
         except Exception:
             hud_fps = self.config.hud_fps
         self.config.hud_fps = hud_fps if hud_fps in current_hud_fps_options() else 60
+        lang = str(values.get("language", self.config.language)).strip()
+        self.config.language = lang if lang in {"zh-CN", "en-US"} else "zh-CN"
+        self.i18n = load_i18n(self.config.language)
         direction = values.get("mode_direction_enable", None)
         linear = values.get("mode_linear_pedal_enable", None)
         key_pedal = values.get("mode_key_pedal_enable", None)
@@ -1619,7 +1681,7 @@ class MouseToVirtualGamepad:
             self.hud_fullscreen_rect = None
         if save_to_file:
             save_default_config(self.config)
-        self.state.last_error = "设置已应用"
+        self.state.last_error = self._t("app.error.settings_applied", "Settings applied")
 
     def set_reference_to_current_mouse(self) -> None:
         x, y = self.mouse_controller.position
@@ -1685,7 +1747,7 @@ class MouseToVirtualGamepad:
                 self.cursor_hidden = True
             self.relative_center = self._virtual_screen_center()
             self._warp_to_center()
-            self.state.last_error = "已开启"
+            self.state.last_error = self._t("app.error.enabled", "Enabled")
         else:
             clip_cursor_rect(None)
             self.mouse_clip_rect = None
@@ -1693,7 +1755,7 @@ class MouseToVirtualGamepad:
                 set_cursor_visible(True)
                 self.cursor_hidden = False
             self.reset_all()
-            self.state.last_error = "已关闭并回中"
+            self.state.last_error = self._t("app.error.disabled", "Disabled and recentered")
 
     def reset_all(self) -> None:
         self.set_reference_to_current_mouse()
@@ -1731,7 +1793,7 @@ class MouseToVirtualGamepad:
             self.config.mode_direction_enable = d
             self.config.mode_linear_pedal_enable = l
             self.config.mode_key_pedal_enable = k
-            self.state.last_error = "控制模式模板已切换"
+            self.state.last_error = self._t("app.error.mode_switched", "Control mode template switched")
             return
 
         if self._combo_just_pressed("toggle_mapper", self.toggle_combo):
@@ -1747,7 +1809,7 @@ class MouseToVirtualGamepad:
                 self.hud_fullscreen_rect = rect if rect[2] > 0 and rect[3] > 0 else None
             else:
                 self.hud_fullscreen_rect = None
-            self.state.last_error = "HUD全屏已开启 (Alt+F退出)" if self.hud_fullscreen_enabled else "HUD小窗模式"
+            self.state.last_error = self._t("app.error.fullscreen_on", "HUD fullscreen enabled (Alt+F to exit)") if self.hud_fullscreen_enabled else self._t("app.error.fullscreen_off", "HUD windowed mode")
             return
 
         if self.config.gear_mapping_mode == "keyboard":
@@ -2128,6 +2190,8 @@ class MouseToVirtualGamepad:
             windows_scale=self.config.windows_scale,
             fullscreen_scale=self.config.fullscreen_scale,
             fullscreen_alpha=self.config.fullscreen_alpha,
+            language=self.config.language,
+            i18n_map=self.i18n,
             settings_getter=self.get_runtime_settings,
             settings_apply_callback=self.apply_runtime_settings,
             settings_open_callback=self.set_settings_panel_open,
@@ -2157,7 +2221,7 @@ class MouseToVirtualGamepad:
             self.hud_fullscreen_enabled = False
             self.hud_fullscreen_rect = None
             if not available:
-                self.state.last_error = "透明全屏HUD初始化失败，已自动回到小窗模式"
+                self.state.last_error = self._t("app.error.transparent_init_fail", "Transparent fullscreen HUD init failed, switched to windowed mode")
 
     def set_settings_panel_open(self, is_open: bool) -> None:
         self.settings_panel_open = bool(is_open)

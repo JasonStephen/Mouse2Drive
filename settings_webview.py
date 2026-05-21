@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 
 import webview
-from gamepad_mouse_mapper import load_settings_defaults, load_settings_options
+from gamepad_mouse_mapper import load_i18n, load_settings_defaults, load_settings_options
 
 
 class Api:
@@ -55,13 +55,17 @@ def main():
     bootstrap_path = ui_dir / "bootstrap_state.js"
     defaults = load_settings_defaults()
     options = load_settings_options()
+    language = str(state.get("language", defaults.get("language", "zh-CN")))
+    i18n = load_i18n(language)
     bootstrap_text = (
         "window.__BOOTSTRAP_STATE__ = " + json.dumps(state, ensure_ascii=False) + ";\n"
         "window.__SETTINGS_DEFAULTS__ = " + json.dumps(defaults, ensure_ascii=False) + ";\n"
         "window.__SETTINGS_OPTIONS__ = " + json.dumps(options, ensure_ascii=False) + ";\n"
+        "window.__I18N__ = " + json.dumps(i18n, ensure_ascii=False) + ";\n"
     )
     bootstrap_path.write_text(bootstrap_text, encoding="utf-8")
-    window = webview.create_window("设置", ui_path.as_uri(), js_api=api, width=760, height=420, min_size=(720, 420), resizable=True)
+    window_title = i18n.get("settings.title", "Settings")
+    window = webview.create_window(window_title, ui_path.as_uri(), js_api=api, width=760, height=420, min_size=(720, 420), resizable=True)
     api.set_window(window)
     webview.start()
 
