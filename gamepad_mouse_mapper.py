@@ -3,6 +3,7 @@ import ctypes
 import threading
 import time
 import tkinter as tk
+from tkinter import messagebox
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,7 @@ class AppConfig:
     control_mode: int = 1
     reference_range_x_px: float = 360.0
     reference_range_y_px: float = 260.0
-    min_output_x: float = 0.23
+    min_output_x: float = 0.235
     debug_mode: bool = False
     hud_fps: int = 25
     gear_pulse_ms: int = 45
@@ -33,6 +34,7 @@ class AppConfig:
     gear_down_button: str = "left_shoulder"
     hide_cursor_on_enable: bool = True
     windows_scale: float = 1.0
+    fullscreen_scale: float = 1.0
     fullscreen_alpha: float = 0.00
 
 
@@ -242,16 +244,18 @@ def load_config() -> AppConfig:
         cfg.gear_down_button = parser.get(section, "gear_down_button", fallback=cfg.gear_down_button)
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
         cfg.windows_scale = parser.getfloat(section, "windows_scale", fallback=cfg.windows_scale)
+        cfg.fullscreen_scale = parser.getfloat(section, "fullscreen_scale", fallback=cfg.fullscreen_scale)
         cfg.fullscreen_alpha = parser.getfloat(section, "fullscreen_alpha", fallback=cfg.fullscreen_alpha)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
     cfg.reference_range_x_px = max(1.0, cfg.reference_range_x_px)
     cfg.reference_range_y_px = max(1.0, cfg.reference_range_y_px)
-    cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 0.95)
+    cfg.min_output_x = clamp(cfg.min_output_x, 0.0, 1.0)
     cfg.hud_fps = int(clamp(cfg.hud_fps, 5, 240))
     cfg.gear_pulse_ms = int(clamp(cfg.gear_pulse_ms, 10, 300))
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 2.0)
+    cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 2.0)
     cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 0.95)
     return cfg
 
@@ -275,6 +279,7 @@ def save_default_config(cfg: AppConfig) -> None:
         "gear_down_button": cfg.gear_down_button,
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
         "windows_scale": f"{cfg.windows_scale:.2f}",
+        "fullscreen_scale": f"{cfg.fullscreen_scale:.2f}",
         "fullscreen_alpha": f"{cfg.fullscreen_alpha:.2f}",
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
@@ -286,16 +291,27 @@ class Indicator:
         self,
         debug_mode: bool = False,
         hud_fps: int = 25,
-        min_output_x: float = 0.23,
+        min_output_x: float = 0.235,
         windows_scale: float = 1.0,
+        fullscreen_scale: float = 1.0,
         fullscreen_alpha: float = 0.00,
+        settings_getter=None,
+        settings_apply_callback=None,
     ) -> None:
         self.debug_mode = debug_mode
         self.hud_fps = int(clamp(hud_fps, 5, 240))
         self.hud_interval_ms = max(1, int(1000 / self.hud_fps))
-        self.min_output_x = clamp(min_output_x, 0.0, 0.95)
-        self.ui_scale = max(1.15, windows_scale * 1.15)
+        self.min_output_x = clamp(min_output_x, 0.0, 1.0)
+        self.window_scale = clamp(windows_scale, 0.8, 2.0)
+        self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 2.0)
+        self.ui_scale = max(1.15, self.window_scale * 1.15)
         self.fullscreen_alpha = clamp(fullscreen_alpha, 0.0, 0.95)
+        self.settings_getter = settings_getter
+        self.settings_apply_callback = settings_apply_callback
+        self.settings_window: tk.Toplevel | None = None
+        self.settings_window_scale_var: tk.StringVar | None = None
+        self.settings_fullscreen_scale_var: tk.StringVar | None = None
+        self.settings_min_output_var: tk.StringVar | None = None
         self.fullscreen_mode = False
         self.fullscreen_available = True
         self.fullscreen_rect: tuple[int, int, int, int] | None = None
@@ -334,6 +350,8 @@ class Indicator:
         self.status_label.pack(side="left", fill="x", expand=True)
         self.lock_button = tk.Button(self.header, text="锁定", command=self.toggle_lock, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=("Segoe UI", self._font(8), "bold"))
         self.lock_button.pack(side="right")
+        self.settings_button = tk.Button(self.header, text="设置", command=self.open_settings_panel, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=("Segoe UI", self._font(8), "bold"))
+        self.settings_button.pack(side="right", padx=(0, 6))
         self.mode_label = tk.Label(self.frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", self._font(9)), anchor="w", justify="left")
         self.mode_label.pack(fill="x")
         self.canvas = tk.Canvas(self.frame, width=100, height=100, bg="#171717", highlightthickness=0)
@@ -345,8 +363,11 @@ class Indicator:
         self.window_pad_x = max(8, int(round(10 * self.ui_scale)))
         self.window_pad_y = max(3, int(round(4 * self.ui_scale)))
         self.lock_button_pack_kwargs = {"side": "right", "padx": max(8, int(round(10 * self.ui_scale))), "pady": max(3, int(round(4 * self.ui_scale)))}
+        self.settings_button_pack_kwargs = {"side": "right", "padx": (0, 6), "pady": max(3, int(round(4 * self.ui_scale)))}
         self._bind_drag_for_widget(self.frame)
         self.root.bind("<Configure>", lambda _e: self.ensure_on_screen())
+        self.root.bind_all("<Control-o>", self._on_ctrl_o, add="+")
+        self.root.bind_all("<Control-O>", self._on_ctrl_o, add="+")
         self.root.update_idletasks()
         self.apply_view_mode(False)
         self._init_scene()
@@ -408,6 +429,10 @@ class Indicator:
     def _on_drag_release(self, _event) -> None:
         self.fs_dragging_module = False
         self.fs_drag_target = ""
+
+    def _on_ctrl_o(self, _event=None) -> str:
+        self.open_settings_panel()
+        return "break"
 
     def _on_fullscreen_drag_start(self, event) -> None:
         if self._in_fs_lock_bounds(event.x, event.y):
@@ -642,6 +667,126 @@ class Indicator:
     def _font(self, base_size: int) -> int:
         return max(8, int(round(base_size * self.ui_scale)))
 
+    def _effective_scale(self, base_scale: float) -> float:
+        return max(1.15, base_scale * 1.15)
+
+    def _apply_ui_scale(self) -> None:
+        self.ui_scale = self._effective_scale(self.fullscreen_scale if self.fullscreen_mode else self.window_scale)
+        self.window_pad_x = max(8, int(round(10 * self.ui_scale)))
+        self.window_pad_y = max(3, int(round(4 * self.ui_scale)))
+        self.lock_button_pack_kwargs = {"side": "right", "padx": self.window_pad_x, "pady": self.window_pad_y}
+        self.settings_button_pack_kwargs = {"side": "right", "padx": (0, 6), "pady": self.window_pad_y}
+        self.status_label.configure(font=("Segoe UI", self._font(10), "bold"))
+        self.lock_button.configure(font=("Segoe UI", self._font(8), "bold"))
+        self.settings_button.configure(font=("Segoe UI", self._font(8), "bold"))
+        self.mode_label.configure(font=("Segoe UI", self._font(9)))
+        self.error_label.configure(font=("Segoe UI", self._font(8)))
+        self.debug_label.configure(font=("Consolas", self._font(8)))
+
+    def _get_live_settings(self) -> dict:
+        if callable(self.settings_getter):
+            return dict(self.settings_getter())
+        return {
+            "window_scale": self.window_scale,
+            "fullscreen_scale": self.fullscreen_scale,
+            "min_output_x": self.min_output_x,
+        }
+
+    def open_settings_panel(self) -> None:
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.focus_force()
+            self.settings_window.lift()
+            return
+        baseline = self._get_live_settings()
+        win = tk.Toplevel(self.root)
+        win.title("设置")
+        win.geometry("420x230")
+        win.resizable(False, False)
+        win.configure(bg="#1f1f1f")
+        win.transient(self.root)
+        win.grab_set()
+        self.settings_window = win
+        self.settings_window_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('window_scale', self.window_scale)), 0.8, 2.0):.2f}")
+        self.settings_fullscreen_scale_var = tk.StringVar(value=f"{clamp(float(baseline.get('fullscreen_scale', self.fullscreen_scale)), 0.8, 2.0):.2f}")
+        self.settings_min_output_var = tk.StringVar(value=f"{clamp(float(baseline.get('min_output_x', self.min_output_x)), 0.0, 1.0):.3f}")
+
+        form = tk.Frame(win, bg="#1f1f1f")
+        form.pack(fill="both", expand=True, padx=16, pady=16)
+        tk.Label(form, text="小窗缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        tk.Entry(form, textvariable=self.settings_window_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff").grid(row=0, column=1, sticky="w", pady=(0, 6))
+        tk.Label(form, text="全屏缩放 (0.8 - 2.0)", fg="#f0f0f0", bg="#1f1f1f", anchor="w").grid(row=1, column=0, sticky="w", pady=(0, 6))
+        tk.Entry(form, textvariable=self.settings_fullscreen_scale_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff").grid(row=1, column=1, sticky="w", pady=(0, 6))
+        tk.Label(form, text="非零方向起始输出 (0 - 1)", fg="#f0f0f0", bg="#1f1f1f", anchor="w").grid(row=2, column=0, sticky="w", pady=(0, 6))
+        tk.Entry(form, textvariable=self.settings_min_output_var, width=14, bg="#2b2b2b", fg="#ffffff", insertbackground="#ffffff").grid(row=2, column=1, sticky="w", pady=(0, 6))
+        tk.Button(form, text="重置默认", command=self._reset_settings_defaults, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
+
+        actions = tk.Frame(form, bg="#1f1f1f")
+        actions.grid(row=3, column=0, columnspan=3, sticky="e", pady=(18, 0))
+        tk.Button(actions, text="确认并应用", command=self._confirm_settings, bg="#196d2d", fg="#ffffff", activebackground="#238a3b", activeforeground="#ffffff", bd=0, padx=12).pack(side="left", padx=(0, 8))
+        tk.Button(actions, text="关闭", command=self._close_settings_with_prompt, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, padx=12).pack(side="left")
+        win.protocol("WM_DELETE_WINDOW", self._close_settings_with_prompt)
+
+    def _reset_settings_defaults(self) -> None:
+        if self.settings_min_output_var is not None:
+            self.settings_min_output_var.set("0.235")
+
+    def _parse_settings_from_form(self) -> dict | None:
+        try:
+            window_scale = clamp(float(self.settings_window_scale_var.get()), 0.8, 2.0)
+            fullscreen_scale = clamp(float(self.settings_fullscreen_scale_var.get()), 0.8, 2.0)
+            min_output_x = clamp(float(self.settings_min_output_var.get()), 0.0, 1.0)
+            return {"window_scale": window_scale, "fullscreen_scale": fullscreen_scale, "min_output_x": min_output_x}
+        except Exception:
+            messagebox.showerror("设置错误", "请输入有效数字。")
+            return None
+
+    def _settings_form_changed(self, baseline: dict) -> bool:
+        parsed = self._parse_settings_from_form()
+        if parsed is None:
+            return False
+        return (
+            abs(parsed["window_scale"] - float(baseline.get("window_scale", self.window_scale))) > 1e-6
+            or abs(parsed["fullscreen_scale"] - float(baseline.get("fullscreen_scale", self.fullscreen_scale))) > 1e-6
+            or abs(parsed["min_output_x"] - float(baseline.get("min_output_x", self.min_output_x))) > 1e-6
+        )
+
+    def _apply_settings_values(self, values: dict, save_to_file: bool) -> None:
+        self.window_scale = clamp(float(values["window_scale"]), 0.8, 2.0)
+        self.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 2.0)
+        self.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
+        if callable(self.settings_apply_callback):
+            self.settings_apply_callback(dict(values), save_to_file)
+        self._apply_ui_scale()
+        self._init_scene()
+
+    def _confirm_settings(self) -> None:
+        parsed = self._parse_settings_from_form()
+        if parsed is None:
+            return
+        self._apply_settings_values(parsed, save_to_file=True)
+        self._destroy_settings_window()
+
+    def _destroy_settings_window(self) -> None:
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.grab_release()
+            self.settings_window.destroy()
+        self.settings_window = None
+
+    def _close_settings_with_prompt(self) -> None:
+        baseline = self._get_live_settings()
+        if not self._settings_form_changed(baseline):
+            self._destroy_settings_window()
+            return
+        save_choice = messagebox.askyesnocancel("保存设置", "检测到修改，是否保存并应用？")
+        if save_choice is None:
+            return
+        if save_choice:
+            parsed = self._parse_settings_from_form()
+            if parsed is None:
+                return
+            self._apply_settings_values(parsed, save_to_file=True)
+        self._destroy_settings_window()
+
     def _draw_lx(self, lx: float) -> None:
         # Display scale for steering:
         # [-1, -min); 0; (min, 1]
@@ -684,6 +829,7 @@ class Indicator:
     def apply_view_mode(self, fullscreen_enabled: bool) -> None:
         changed = self.fullscreen_mode != fullscreen_enabled
         self.fullscreen_mode = fullscreen_enabled
+        self._apply_ui_scale()
         if not changed and self.scene:
             return
         if self.fullscreen_mode:
@@ -701,6 +847,7 @@ class Indicator:
             self.debug_label.configure(bg=self.fullscreen_bg_key)
             self.canvas.configure(bg=self.fullscreen_bg_key)
             self.lock_button.pack_forget()
+            self.settings_button.pack_forget()
             self.header.pack_forget()
             self.mode_label.pack_forget()
             self.error_label.pack_forget()
@@ -727,6 +874,8 @@ class Indicator:
                 self.header.pack(fill="x")
             if not self.lock_button.winfo_manager():
                 self.lock_button.pack(**self.lock_button_pack_kwargs)
+            if not self.settings_button.winfo_manager():
+                self.settings_button.pack(**self.settings_button_pack_kwargs)
             if not self.mode_label.winfo_manager():
                 self.mode_label.pack(fill="x")
             self.canvas.pack_forget()
@@ -835,6 +984,21 @@ class MouseToVirtualGamepad:
         except Exception as exc:
             self.pad = None
             self.state.last_error = f"虚拟手柄创建失败: {exc}"
+
+    def get_runtime_settings(self) -> dict:
+        return {
+            "window_scale": self.config.windows_scale,
+            "fullscreen_scale": self.config.fullscreen_scale,
+            "min_output_x": self.config.min_output_x,
+        }
+
+    def apply_runtime_settings(self, values: dict, save_to_file: bool) -> None:
+        self.config.windows_scale = clamp(float(values["window_scale"]), 0.8, 2.0)
+        self.config.fullscreen_scale = clamp(float(values["fullscreen_scale"]), 0.8, 2.0)
+        self.config.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
+        if save_to_file:
+            save_default_config(self.config)
+        self.state.last_error = "设置已应用"
 
     def set_reference_to_current_mouse(self) -> None:
         x, y = self.mouse_controller.position
@@ -1091,7 +1255,10 @@ class MouseToVirtualGamepad:
             hud_fps=self.config.hud_fps,
             min_output_x=self.config.min_output_x,
             windows_scale=self.config.windows_scale,
+            fullscreen_scale=self.config.fullscreen_scale,
             fullscreen_alpha=self.config.fullscreen_alpha,
+            settings_getter=self.get_runtime_settings,
+            settings_apply_callback=self.apply_runtime_settings,
         )
         indicator.root.protocol("WM_DELETE_WINDOW", self.stop_event.set)
 
