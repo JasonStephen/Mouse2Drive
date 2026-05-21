@@ -21,6 +21,10 @@ SETTINGS_DEFAULTS_PATH = Path(__file__).with_name("settings_defaults.cfg")
 SETTINGS_OPTIONS_PATH = Path(__file__).with_name("settings_options.cfg")
 POLL_INTERVAL = 0.01
 HUD_FPS_OPTIONS = (15, 30, 60, 90, 120)
+ICON_FONT_FAMILY = "Segoe MDL2 Assets"
+ICON_SETTINGS = "\uE713"
+ICON_LOCK = "\uE72E"
+ICON_UNLOCK = "\uE785"
 
 
 @dataclass
@@ -57,7 +61,6 @@ class AppConfig:
     hide_cursor_on_enable: bool = True
     windows_scale: float = 1.0
     fullscreen_scale: float = 1.0
-    fullscreen_alpha: float = 0.00
 
 
 @dataclass
@@ -390,7 +393,6 @@ def load_config() -> AppConfig:
         cfg.hide_cursor_on_enable = parser.getboolean(section, "hide_cursor_on_enable", fallback=cfg.hide_cursor_on_enable)
         cfg.windows_scale = parser.getfloat(section, "windows_scale", fallback=cfg.windows_scale)
         cfg.fullscreen_scale = parser.getfloat(section, "fullscreen_scale", fallback=cfg.fullscreen_scale)
-        cfg.fullscreen_alpha = parser.getfloat(section, "fullscreen_alpha", fallback=cfg.fullscreen_alpha)
 
     if cfg.control_mode < 1 or cfg.control_mode > 4:
         cfg.control_mode = 1
@@ -426,7 +428,6 @@ def load_config() -> AppConfig:
         cfg.gear_down_button = "left_thumb"
     cfg.windows_scale = clamp(cfg.windows_scale, 0.8, 1.5)
     cfg.fullscreen_scale = clamp(cfg.fullscreen_scale, 0.8, 1.5)
-    cfg.fullscreen_alpha = clamp(cfg.fullscreen_alpha, 0.0, 0.95)
     return cfg
 
 
@@ -465,7 +466,6 @@ def save_default_config(cfg: AppConfig) -> None:
         "hide_cursor_on_enable": str(cfg.hide_cursor_on_enable).lower(),
         "windows_scale": f"{cfg.windows_scale:.2f}",
         "fullscreen_scale": f"{cfg.fullscreen_scale:.2f}",
-        "fullscreen_alpha": f"{cfg.fullscreen_alpha:.2f}",
     }
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         parser.write(f)
@@ -547,7 +547,6 @@ def load_settings_defaults() -> dict:
         "reference_range_y_px": 260.0,
         "reference_range_x_ratio": 0.1875,
         "reference_range_y_ratio": 0.2407,
-        "fullscreen_alpha": 0.0,
     }
     try:
         if SETTINGS_DEFAULTS_PATH.exists():
@@ -558,7 +557,7 @@ def load_settings_defaults() -> dict:
                     result[k] = parser.get(sec, k, fallback=str(result[k]))
                 for k in ("hud_fps", "gear_pulse_ms", "control_mode"):
                     result[k] = parser.getint(sec, k, fallback=int(result[k]))
-                for k in ("window_scale", "fullscreen_scale", "min_output_x", "reference_range_x_px", "reference_range_y_px", "reference_range_x_ratio", "reference_range_y_ratio", "fullscreen_alpha"):
+                for k in ("window_scale", "fullscreen_scale", "min_output_x", "reference_range_x_px", "reference_range_y_px", "reference_range_x_ratio", "reference_range_y_ratio"):
                     result[k] = parser.getfloat(sec, k, fallback=float(result[k]))
                 result["fullscreen_mode"] = _to_bool(parser.get(sec, "fullscreen_mode", fallback=str(result["fullscreen_mode"])), bool(result["fullscreen_mode"]))
                 result["hide_cursor_on_enable"] = _to_bool(parser.get(sec, "hide_cursor_on_enable", fallback=str(result["hide_cursor_on_enable"])), bool(result["hide_cursor_on_enable"]))
@@ -601,7 +600,6 @@ def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
     cfg.reference_range_y_px = float(defaults.get("reference_range_y_px", cfg.reference_range_y_px))
     cfg.reference_range_x_ratio = float(defaults.get("reference_range_x_ratio", cfg.reference_range_x_ratio))
     cfg.reference_range_y_ratio = float(defaults.get("reference_range_y_ratio", cfg.reference_range_y_ratio))
-    cfg.fullscreen_alpha = float(defaults.get("fullscreen_alpha", cfg.fullscreen_alpha))
 
 
 def current_hud_fps_options() -> tuple[int, ...]:
@@ -620,7 +618,6 @@ class Indicator:
         min_output_x: float = 0.235,
         windows_scale: float = 1.0,
         fullscreen_scale: float = 1.0,
-        fullscreen_alpha: float = 0.00,
         settings_getter=None,
         settings_apply_callback=None,
         settings_open_callback=None,
@@ -632,7 +629,6 @@ class Indicator:
         self.window_scale = clamp(windows_scale, 0.8, 1.5)
         self.fullscreen_scale = clamp(fullscreen_scale, 0.8, 1.5)
         self.ui_scale = max(1.15, self.window_scale * 1.15)
-        self.fullscreen_alpha = clamp(fullscreen_alpha, 0.0, 0.95)
         self.settings_getter = settings_getter
         self.settings_apply_callback = settings_apply_callback
         self.settings_open_callback = settings_open_callback
@@ -685,9 +681,9 @@ class Indicator:
         self.header.pack(fill="x")
         self.status_label = tk.Label(self.header, text="状态: OFF", fg="#ff6b6b", bg="#1f1f1f", font=("Segoe UI", self._font(10), "bold"), anchor="w")
         self.status_label.pack(side="left", fill="x", expand=True)
-        self.lock_button = tk.Button(self.header, text="锁定", command=self.toggle_lock, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=("Segoe UI", self._font(8), "bold"))
+        self.lock_button = tk.Button(self.header, text=ICON_LOCK, width=2, command=self.toggle_lock, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=(ICON_FONT_FAMILY, self._font(10), "normal"))
         self.lock_button.pack(side="right")
-        self.settings_button = tk.Button(self.header, text="设置", command=self.open_settings_panel, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=("Segoe UI", self._font(8), "bold"))
+        self.settings_button = tk.Button(self.header, text=ICON_SETTINGS, width=2, command=self.open_settings_panel, bg="#2b2b2b", fg="#f0f0f0", activebackground="#3a3a3a", activeforeground="#ffffff", bd=0, font=(ICON_FONT_FAMILY, self._font(10), "normal"))
         self.settings_button.pack(side="right", padx=(0, 6))
         self.mode_label = tk.Label(self.frame, text="模式: 1", fg="#b7d8ff", bg="#1f1f1f", font=("Segoe UI", self._font(9)), anchor="w", justify="left")
         self.mode_label.pack(fill="x")
@@ -731,7 +727,7 @@ class Indicator:
 
     def toggle_lock(self) -> None:
         self.locked = not self.locked
-        self.lock_button.config(text="锁定" if self.locked else "解锁")
+        self.lock_button.config(text=(ICON_LOCK if self.locked else ICON_UNLOCK))
 
     def _bind_drag_for_widget(self, widget: tk.Widget) -> None:
         widget.bind("<ButtonPress-1>", self._on_drag_start, add="+")
@@ -773,6 +769,9 @@ class Indicator:
         return "break"
 
     def _on_fullscreen_drag_start(self, event) -> None:
+        if self._in_fs_settings_bounds(event.x, event.y):
+            self.open_settings_panel()
+            return
         if self._in_fs_lock_bounds(event.x, event.y):
             self.locked = not self.locked
             self._update_fs_lock_visual()
@@ -894,15 +893,21 @@ class Indicator:
         self.scene["mode_text"] = c.create_text(28, 28 + self._font(20) + 14, text="模式: -", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="nw")
         self.scene["error_text"] = c.create_text(28, sh - 28, text="", fill="#ffffff", font=("Segoe UI", self._font(16), "bold"), anchor="sw")
         self.scene["debug_text"] = c.create_text(28, sh - 28 - self._font(16) - 10, text="", fill="#d6f0ff", font=("Consolas", self._font(12)), anchor="sw")
-        # Fullscreen lock toggle (top-right)
-        lock_w, lock_h = 116, 44
+        # Fullscreen top-right icons: settings + lock
+        lock_w, lock_h = 52, 44
         lock_x1 = sw - 24
         lock_y0 = 24
         lock_x0 = lock_x1 - lock_w
         lock_y1 = lock_y0 + lock_h
         self.fs_lock_bounds = (lock_x0, lock_y0, lock_x1, lock_y1)
         self.scene["fs_lock_bg"] = c.create_rectangle(lock_x0, lock_y0, lock_x1, lock_y1, outline="#d0d0d0", width=2)
-        self.scene["fs_lock_text"] = c.create_text((lock_x0 + lock_x1) // 2, (lock_y0 + lock_y1) // 2, text="", fill="#ffffff", font=("Segoe UI", self._font(11), "bold"))
+        self.scene["fs_lock_text"] = c.create_text((lock_x0 + lock_x1) // 2, (lock_y0 + lock_y1) // 2, text="", fill="#ffffff", font=(ICON_FONT_FAMILY, self._font(15), "normal"))
+        set_gap = 8
+        set_x1 = lock_x0 - set_gap
+        set_x0 = set_x1 - lock_w
+        self.fs_settings_bounds = (set_x0, lock_y0, set_x1, lock_y1)
+        self.scene["fs_settings_bg"] = c.create_rectangle(set_x0, lock_y0, set_x1, lock_y1, outline="#d0d0d0", width=2, fill="#2d2d2d")
+        self.scene["fs_settings_text"] = c.create_text((set_x0 + set_x1) // 2, (lock_y0 + lock_y1) // 2, text=ICON_SETTINGS, fill="#ffffff", font=(ICON_FONT_FAMILY, self._font(15), "normal"))
         self._update_fs_lock_visual()
 
         ox = int(self.fs_module_offset_x)
@@ -917,7 +922,7 @@ class Indicator:
         lx_w = int(sw * 0.34)
         lx_h = max(20, int(sh * 0.028))
         lx_y = int(sh * 0.75)
-        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2 + lx_ox, lx_y - lx_h // 2 + lx_oy, center_x + lx_w // 2 + lx_ox, lx_y + lx_h // 2 + lx_oy, outline="#c7c7c7", fill="#000000", stipple="gray50")
+        self.scene["lx_track"] = c.create_rectangle(center_x - lx_w // 2 + lx_ox, lx_y - lx_h // 2 + lx_oy, center_x + lx_w // 2 + lx_ox, lx_y + lx_h // 2 + lx_oy, outline="#c7c7c7", fill="#000000")
         c.create_line(center_x + lx_ox, lx_y - lx_h // 2 - 8 + lx_oy, center_x + lx_ox, lx_y + lx_h // 2 + 8 + lx_oy, fill="#e7eef5", width=2)
         self.scene["lx_fill"] = c.create_rectangle(center_x + lx_ox, lx_y - lx_h // 2 + 2 + lx_oy, center_x + lx_ox, lx_y + lx_h // 2 - 2 + lx_oy, outline="", fill="#67b7ff")
         bar_h = int(sh * 0.26)
@@ -926,9 +931,9 @@ class Indicator:
         bars_y1 = bars_y0 + bar_h
         bx = int(sw * 0.70)
         gx = int(sw * 0.77)
-        self.scene["brake_track"] = c.create_rectangle(bx + brake_ox, bars_y0 + brake_oy, bx + bar_w + brake_ox, bars_y1 + brake_oy, outline="#c7c7c7", fill="#000000", stipple="gray50")
+        self.scene["brake_track"] = c.create_rectangle(bx + brake_ox, bars_y0 + brake_oy, bx + bar_w + brake_ox, bars_y1 + brake_oy, outline="#c7c7c7", fill="#000000")
         self.scene["brake_fill"] = c.create_rectangle(bx + 1 + brake_ox, bars_y1 - 1 + brake_oy, bx + bar_w - 1 + brake_ox, bars_y1 - 1 + brake_oy, outline="", fill="#ff6b6b")
-        self.scene["gas_track"] = c.create_rectangle(gx + gas_ox, bars_y0 + gas_oy, gx + bar_w + gas_ox, bars_y1 + gas_oy, outline="#c7c7c7", fill="#000000", stipple="gray50")
+        self.scene["gas_track"] = c.create_rectangle(gx + gas_ox, bars_y0 + gas_oy, gx + bar_w + gas_ox, bars_y1 + gas_oy, outline="#c7c7c7", fill="#000000")
         self.scene["gas_fill"] = c.create_rectangle(gx + 1 + gas_ox, bars_y1 - 1 + gas_oy, gx + bar_w - 1 + gas_ox, bars_y1 - 1 + gas_oy, outline="", fill="#37d45c")
         c.create_text(bx + bar_w // 2 + brake_ox, bars_y1 + 36 + brake_oy, text="刹车", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
         c.create_text(gx + bar_w // 2 + gas_ox, bars_y1 + 36 + gas_oy, text="油门", fill="#ffffff", font=("Segoe UI", self._font(13), "bold"))
@@ -962,8 +967,14 @@ class Indicator:
     def _update_fs_lock_visual(self) -> None:
         if "fs_lock_text" not in self.scene:
             return
-        self.canvas.itemconfig(self.scene["fs_lock_text"], text=("锁定" if self.locked else "解锁"))
+        self.canvas.itemconfig(self.scene["fs_lock_text"], text=(ICON_LOCK if self.locked else ICON_UNLOCK))
         self.canvas.itemconfig(self.scene["fs_lock_bg"], fill=("#2d2d2d" if self.locked else "#196d2d"))
+
+    def _in_fs_settings_bounds(self, x: int, y: int) -> bool:
+        if not hasattr(self, "fs_settings_bounds"):
+            return False
+        x0, y0, x1, y1 = self.fs_settings_bounds
+        return x0 <= x <= x1 and y0 <= y <= y1
 
     def _in_fs_lock_bounds(self, x: int, y: int) -> bool:
         if not hasattr(self, "fs_lock_bounds"):
@@ -1015,8 +1026,8 @@ class Indicator:
         self.lock_button_pack_kwargs = {"side": "right", "padx": self.window_pad_x, "pady": self.window_pad_y}
         self.settings_button_pack_kwargs = {"side": "right", "padx": (0, 6), "pady": self.window_pad_y}
         self.status_label.configure(font=("Segoe UI", self._font(10), "bold"))
-        self.lock_button.configure(font=("Segoe UI", self._font(8), "bold"))
-        self.settings_button.configure(font=("Segoe UI", self._font(8), "bold"))
+        self.lock_button.configure(font=(ICON_FONT_FAMILY, self._font(9), "normal"))
+        self.settings_button.configure(font=(ICON_FONT_FAMILY, self._font(9), "normal"))
         self.mode_label.configure(font=("Segoe UI", self._font(9)))
         self.error_label.configure(font=("Segoe UI", self._font(8)))
         self.debug_label.configure(font=("Consolas", self._font(8)))
@@ -1114,6 +1125,8 @@ class Indicator:
             self.settings_apply_callback(dict(values), save_to_file)
         self._apply_ui_scale()
         self._init_scene()
+        if not self.fullscreen_mode:
+            self.root.attributes("-alpha", 0.92)
         if not self.fullscreen_mode:
             self.position_bottom_right()
 
@@ -1996,7 +2009,6 @@ class MouseToVirtualGamepad:
             min_output_x=self.config.min_output_x,
             windows_scale=self.config.windows_scale,
             fullscreen_scale=self.config.fullscreen_scale,
-            fullscreen_alpha=self.config.fullscreen_alpha,
             settings_getter=self.get_runtime_settings,
             settings_apply_callback=self.apply_runtime_settings,
             settings_open_callback=self.set_settings_panel_open,
