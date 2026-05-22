@@ -459,13 +459,6 @@ async function closePanel() {
 function bindHoverDetail(el, key) {
   if (!el) return;
   el.addEventListener("mouseenter", () => { setDetailContent(detailMap[key] || ""); });
-  el.addEventListener("mouseleave", () => {
-    if (tabs.language.classList.contains("active")) setDetailContent(detailMap.language);
-    else if (tabs.mode.classList.contains("active")) setDetailContent(detailMap.mode);
-    else if (tabs.display.classList.contains("active")) setDetailContent(detailMap.display);
-    else if (tabs.sense.classList.contains("active")) setDetailContent(detailMap.sense);
-    else setDetailContent(detailMap.bind);
-  });
 }
 
 function bindDragAdjust(el, inputKey, lo, hi, step) {
@@ -583,6 +576,11 @@ function wireIconActions() {
 }
 
 Object.keys(inputs).forEach((key) => bindHoverDetail(inputs[key], key === "language" ? "language" : key));
+bindHoverDetail(tabs.language, "language");
+bindHoverDetail(tabs.mode, "mode");
+bindHoverDetail(tabs.display, "display");
+bindHoverDetail(tabs.sense, "sense");
+bindHoverDetail(tabs.bind, "bind");
 [
   "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","mode_gear_enable","fullscreen_mode","window_scale","fullscreen_scale",
   "fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x","gear_pulse_ms",
