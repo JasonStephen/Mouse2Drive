@@ -36,6 +36,7 @@ class AppConfig:
     mode_direction_enable: bool = True
     mode_linear_pedal_enable: bool = True
     mode_key_pedal_enable: bool = False
+    mode_gear_enable: bool = True
     steering_axis: str = "left_x"
     reference_range_x_px: float = 360.0
     reference_range_y_px: float = 260.0
@@ -422,6 +423,7 @@ def load_config() -> AppConfig:
         cfg.mode_direction_enable = parser.getboolean(section, "mode_direction_enable", fallback=cfg.mode_direction_enable)
         cfg.mode_linear_pedal_enable = parser.getboolean(section, "mode_linear_pedal_enable", fallback=cfg.mode_linear_pedal_enable)
         cfg.mode_key_pedal_enable = parser.getboolean(section, "mode_key_pedal_enable", fallback=cfg.mode_key_pedal_enable)
+        cfg.mode_gear_enable = parser.getboolean(section, "mode_gear_enable", fallback=cfg.mode_gear_enable)
         cfg.steering_axis = parser.get(section, "steering_axis", fallback=cfg.steering_axis)
         cfg.reference_range_x_px = parser.getfloat(section, "reference_range_x_px", fallback=cfg.reference_range_x_px)
         cfg.reference_range_y_px = parser.getfloat(section, "reference_range_y_px", fallback=cfg.reference_range_y_px)
@@ -525,6 +527,7 @@ def save_default_config(cfg: AppConfig) -> None:
         "mode_direction_enable": str(cfg.mode_direction_enable).lower(),
         "mode_linear_pedal_enable": str(cfg.mode_linear_pedal_enable).lower(),
         "mode_key_pedal_enable": str(cfg.mode_key_pedal_enable).lower(),
+        "mode_gear_enable": str(cfg.mode_gear_enable).lower(),
         "steering_axis": cfg.steering_axis,
         "reference_range_x_px": str(cfg.reference_range_x_px),
         "reference_range_y_px": str(cfg.reference_range_y_px),
@@ -619,6 +622,7 @@ def load_settings_defaults() -> dict:
         "mode_direction_enable": True,
         "mode_linear_pedal_enable": True,
         "mode_key_pedal_enable": False,
+        "mode_gear_enable": True,
         "steering_axis": "left_x",
         "toggle_hotkey": "shift+v",
         "switch_mode_hotkey": "alt+shift+v",
@@ -653,7 +657,7 @@ def load_settings_defaults() -> dict:
                     result[k] = parser.get(sec, k, fallback=str(result[k]))
                 for k in ("hud_fps", "gear_pulse_ms", "control_mode"):
                     result[k] = parser.getint(sec, k, fallback=int(result[k]))
-                for k in ("mode_direction_enable", "mode_linear_pedal_enable", "mode_key_pedal_enable"):
+                for k in ("mode_direction_enable", "mode_linear_pedal_enable", "mode_key_pedal_enable", "mode_gear_enable"):
                     result[k] = _to_bool(parser.get(sec, k, fallback=str(result[k])), bool(result[k]))
                 for k in ("window_scale", "fullscreen_scale", "fullscreen_alpha", "min_output_x", "reference_range_x_px", "reference_range_y_px", "reference_range_x_ratio", "reference_range_y_ratio"):
                     result[k] = parser.getfloat(sec, k, fallback=float(result[k]))
@@ -679,6 +683,7 @@ def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
     cfg.mode_direction_enable = bool(defaults.get("mode_direction_enable", cfg.mode_direction_enable))
     cfg.mode_linear_pedal_enable = bool(defaults.get("mode_linear_pedal_enable", cfg.mode_linear_pedal_enable))
     cfg.mode_key_pedal_enable = bool(defaults.get("mode_key_pedal_enable", cfg.mode_key_pedal_enable))
+    cfg.mode_gear_enable = bool(defaults.get("mode_gear_enable", cfg.mode_gear_enable))
     cfg.steering_axis = str(defaults.get("steering_axis", cfg.steering_axis))
     cfg.toggle_hotkey = str(defaults.get("toggle_hotkey", cfg.toggle_hotkey))
     cfg.switch_mode_hotkey = str(defaults.get("switch_mode_hotkey", cfg.switch_mode_hotkey))
@@ -1549,6 +1554,7 @@ class MouseToVirtualGamepad:
             "mode_direction_enable": self.config.mode_direction_enable,
             "mode_linear_pedal_enable": self.config.mode_linear_pedal_enable,
             "mode_key_pedal_enable": self.config.mode_key_pedal_enable,
+            "mode_gear_enable": self.config.mode_gear_enable,
             "steering_axis": self.config.steering_axis,
             "toggle_hotkey": self.config.toggle_hotkey,
             "switch_mode_hotkey": self.config.switch_mode_hotkey,
@@ -1591,7 +1597,8 @@ class MouseToVirtualGamepad:
         direction = values.get("mode_direction_enable", None)
         linear = values.get("mode_linear_pedal_enable", None)
         key_pedal = values.get("mode_key_pedal_enable", None)
-        if direction is not None or linear is not None or key_pedal is not None:
+        gear = values.get("mode_gear_enable", None)
+        if direction is not None or linear is not None or key_pedal is not None or gear is not None:
             self.config.mode_direction_enable = bool(
                 self.config.mode_direction_enable if direction is None else direction
             )
@@ -1600,6 +1607,9 @@ class MouseToVirtualGamepad:
             )
             self.config.mode_key_pedal_enable = bool(
                 self.config.mode_key_pedal_enable if key_pedal is None else key_pedal
+            )
+            self.config.mode_gear_enable = bool(
+                self.config.mode_gear_enable if gear is None else gear
             )
             self.config.control_mode = flags_to_control_mode(
                 self.config.mode_direction_enable,
@@ -1616,6 +1626,9 @@ class MouseToVirtualGamepad:
             self.config.mode_direction_enable = d
             self.config.mode_linear_pedal_enable = l
             self.config.mode_key_pedal_enable = k
+            self.config.mode_gear_enable = bool(
+                self.config.mode_gear_enable if gear is None else gear
+            )
         steering_axis = str(values.get("steering_axis", self.config.steering_axis)).strip().lower()
         if steering_axis in {"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"}:
             self.config.steering_axis = steering_axis
@@ -1812,7 +1825,7 @@ class MouseToVirtualGamepad:
             self.state.last_error = self._t("app.error.fullscreen_on", "HUD fullscreen enabled (Alt+F to exit)") if self.hud_fullscreen_enabled else self._t("app.error.fullscreen_off", "HUD windowed mode")
             return
 
-        if self.config.gear_mapping_mode == "keyboard":
+        if self.config.mode_gear_enable and self.config.gear_mapping_mode == "keyboard":
             gear_up_combo = parse_hotkey_combo(self.config.gear_up_key)
             gear_down_combo = parse_hotkey_combo(self.config.gear_down_key)
             now = time.time()
@@ -1878,7 +1891,7 @@ class MouseToVirtualGamepad:
             return
         now = time.time()
         pulse = self.config.gear_pulse_ms / 1000.0
-        if self.config.gear_mapping_mode != "none":
+        if self.config.mode_gear_enable and self.config.gear_mapping_mode != "none":
             if self.gear_up_mouse_btn is not None and button == self.gear_up_mouse_btn:
                 self.gear_up_until = max(self.gear_up_until, now + pulse)
                 self._dbg(f"mouse_click gear_up pulse set mode={self.config.gear_mapping_mode} button={self.config.gear_up_mouse_button} until={self.gear_up_until:.3f}")
@@ -1899,7 +1912,7 @@ class MouseToVirtualGamepad:
             self.brake_scroll_until = max(self.brake_scroll_until, now + pulse)
         if self.config.brake_mouse_button == "wheel_down" and dy < 0:
             self.brake_scroll_until = max(self.brake_scroll_until, now + pulse)
-        if self.config.gear_mapping_mode != "none":
+        if self.config.mode_gear_enable and self.config.gear_mapping_mode != "none":
             if self.config.gear_up_mouse_button == "wheel_up" and dy > 0:
                 self.gear_up_until = max(self.gear_up_until, now + pulse)
                 self._dbg(f"mouse_scroll gear_up pulse set mode={self.config.gear_mapping_mode} dy={dy} bind={self.config.gear_up_mouse_button} until={self.gear_up_until:.3f}")
@@ -2032,8 +2045,8 @@ class MouseToVirtualGamepad:
         elif self.config.steering_axis == "left_trigger":
             lt = max(lt, steer_trigger)
         now = time.time()
-        gear_up_pressed = now < self.gear_up_until
-        gear_down_pressed = now < self.gear_down_until
+        gear_up_pressed = self.config.mode_gear_enable and (now < self.gear_up_until)
+        gear_down_pressed = self.config.mode_gear_enable and (now < self.gear_down_until)
 
         if self.config.gas_brake_mapping_mode == "keyboard":
             self._update_keyboard_pedal_state(self.state.gas_active, self.state.brake_active)

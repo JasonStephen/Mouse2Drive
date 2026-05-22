@@ -16,6 +16,7 @@ const FALLBACK_DEFAULTS = {
   mode_direction_enable: true,
   mode_linear_pedal_enable: true,
   mode_key_pedal_enable: false,
+  mode_gear_enable: true,
   steering_axis: "left_x",
   toggle_hotkey: "shift+v",
   switch_mode_hotkey: "alt+shift+v",
@@ -61,6 +62,7 @@ const inputs = {
   mode_direction_enable: document.getElementById("mode_direction_enable"),
   mode_linear_pedal_enable: document.getElementById("mode_linear_pedal_enable"),
   mode_key_pedal_enable: document.getElementById("mode_key_pedal_enable"),
+  mode_gear_enable: document.getElementById("mode_gear_enable"),
   fullscreen_mode: document.getElementById("fullscreen_mode"),
   window_scale: document.getElementById("window_scale"),
   fullscreen_scale: document.getElementById("fullscreen_scale"),
@@ -102,7 +104,7 @@ function rebuildDetailMap() {
     bind: t("settings.detail.bind", ""),
   };
   [
-    "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","fullscreen_mode","window_scale",
+    "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","mode_gear_enable","fullscreen_mode","window_scale",
     "fullscreen_scale","fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x",
     "gear_pulse_ms","hide_cursor_on_enable","steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey",
     "open_settings_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button",
@@ -137,6 +139,7 @@ function applyTextI18n() {
     "lbl-mode_direction_enable": t("settings.label.mode_direction_enable", "Steering control"),
     "lbl-mode_linear_pedal_enable": t("settings.label.mode_linear_pedal_enable", "Linear pedal"),
     "lbl-mode_key_pedal_enable": t("settings.label.mode_key_pedal_enable", "Key pedal"),
+    "lbl-mode_gear_enable": t("settings.label.mode_gear_enable", "Gear control"),
     "lbl-fullscreen_mode": t("settings.label.fullscreen_mode", "Fullscreen mode"),
     "lbl-window_scale": t("settings.label.window_scale", "Window scale (0.8 - 1.5)"),
     "lbl-fullscreen_scale": t("settings.label.fullscreen_scale", "Fullscreen scale (0.8 - 1.5)"),
@@ -284,6 +287,7 @@ function parseValues() {
     mode_direction_enable: !!inputs.mode_direction_enable.checked,
     mode_linear_pedal_enable: !!inputs.mode_linear_pedal_enable.checked,
     mode_key_pedal_enable: !!inputs.mode_key_pedal_enable.checked,
+    mode_gear_enable: !!inputs.mode_gear_enable.checked,
     window_scale: clamp(parseFloat(inputs.window_scale.value || String(DEFAULTS.window_scale)), 0.8, 1.5),
     fullscreen_scale: clamp(parseFloat(inputs.fullscreen_scale.value || String(DEFAULTS.fullscreen_scale)), 0.8, 1.5),
     fullscreen_alpha: clamp(parseFloat(inputs.fullscreen_alpha.value || String(DEFAULTS.fullscreen_alpha)), 0, 1),
@@ -331,6 +335,7 @@ function setValues(v) {
   inputs.mode_direction_enable.checked = !!(v.mode_direction_enable ?? flags.direction);
   inputs.mode_linear_pedal_enable.checked = !!(v.mode_linear_pedal_enable ?? flags.linear);
   inputs.mode_key_pedal_enable.checked = !!(v.mode_key_pedal_enable ?? flags.key);
+  inputs.mode_gear_enable.checked = !!(v.mode_gear_enable ?? DEFAULTS.mode_gear_enable);
 
   ["steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey","open_settings_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode","gear_up_button","gear_down_button","gear_up_key","gear_down_key"].forEach((k) => {
     if (inputs[k]) inputs[k].value = String(v[k] ?? DEFAULTS[k]);
@@ -555,7 +560,7 @@ function wireIconActions() {
 
 Object.keys(inputs).forEach((key) => bindHoverDetail(inputs[key], key === "language" ? "language" : key));
 [
-  "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","fullscreen_mode","window_scale","fullscreen_scale",
+  "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","mode_gear_enable","fullscreen_mode","window_scale","fullscreen_scale",
   "fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x","gear_pulse_ms",
   "hide_cursor_on_enable","steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey","open_settings_hotkey",
   "gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button",
