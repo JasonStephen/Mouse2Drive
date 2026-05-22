@@ -19,9 +19,7 @@ const FALLBACK_DEFAULTS = {
   mode_gear_enable: true,
   steering_axis: "left_x",
   toggle_hotkey: "shift+v",
-  switch_mode_hotkey: "alt+shift+v",
   toggle_fullscreen_hotkey: "alt+f",
-  open_settings_hotkey: "ctrl+shift+o",
   gas_mouse_button: "right",
   brake_mouse_button: "left",
   gear_up_mouse_button: "wheel_up",
@@ -75,9 +73,7 @@ const inputs = {
   hide_cursor_on_enable: document.getElementById("hide_cursor_on_enable"),
   steering_axis: document.getElementById("steering_axis"),
   toggle_hotkey: document.getElementById("toggle_hotkey"),
-  switch_mode_hotkey: document.getElementById("switch_mode_hotkey"),
   toggle_fullscreen_hotkey: document.getElementById("toggle_fullscreen_hotkey"),
-  open_settings_hotkey: document.getElementById("open_settings_hotkey"),
   gas_mouse_button: document.getElementById("gas_mouse_button"),
   brake_mouse_button: document.getElementById("brake_mouse_button"),
   gear_up_mouse_button: document.getElementById("gear_up_mouse_button"),
@@ -106,8 +102,8 @@ function rebuildDetailMap() {
   [
     "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","mode_gear_enable","fullscreen_mode","window_scale",
     "fullscreen_scale","fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x",
-    "gear_pulse_ms","hide_cursor_on_enable","steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey",
-    "open_settings_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button",
+    "gear_pulse_ms","hide_cursor_on_enable","steering_axis","toggle_hotkey","toggle_fullscreen_hotkey",
+    "gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button",
     "gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode",
     "gear_up_button","gear_down_button","gear_up_key","gear_down_key"
   ].forEach((k) => { detailMap[k] = t(`settings.detail.${k}`, ""); });
@@ -176,9 +172,7 @@ function applyTextI18n() {
     "lbl-hide_cursor_on_enable": t("settings.label.hide_cursor_on_enable", "Hide cursor (experimental)"),
     "lbl-steering_axis": t("settings.label.steering_axis", "Steering mapped axis"),
     "lbl-toggle_hotkey": t("settings.label.toggle_hotkey", "Toggle hotkey"),
-    "lbl-switch_mode_hotkey": t("settings.label.switch_mode_hotkey", "Switch mode hotkey"),
     "lbl-toggle_fullscreen_hotkey": t("settings.label.toggle_fullscreen_hotkey", "Fullscreen hotkey"),
-    "lbl-open_settings_hotkey": t("settings.label.open_settings_hotkey", "Open settings hotkey"),
     "lbl-gas_mouse_button": t("settings.label.gas_mouse_button", "Throttle control"),
     "lbl-brake_mouse_button": t("settings.label.brake_mouse_button", "Brake control"),
     "lbl-gear_up_mouse_button": t("settings.label.gear_up_mouse_button", "Gear up"),
@@ -323,9 +317,7 @@ function parseValues() {
     control_mode: flagsToControlMode(inputs.mode_direction_enable.checked, inputs.mode_linear_pedal_enable.checked, inputs.mode_key_pedal_enable.checked),
     steering_axis: (inputs.steering_axis.value || String(DEFAULTS.steering_axis)).trim(),
     toggle_hotkey: (inputs.toggle_hotkey.value || "").trim(),
-    switch_mode_hotkey: (inputs.switch_mode_hotkey.value || "").trim(),
     toggle_fullscreen_hotkey: (inputs.toggle_fullscreen_hotkey.value || "").trim(),
-    open_settings_hotkey: (inputs.open_settings_hotkey.value || "").trim(),
     gas_mouse_button: (inputs.gas_mouse_button.value || String(DEFAULTS.gas_mouse_button)).trim(),
     brake_mouse_button: (inputs.brake_mouse_button.value || String(DEFAULTS.brake_mouse_button)).trim(),
     gear_up_mouse_button: (inputs.gear_up_mouse_button.value || String(DEFAULTS.gear_up_mouse_button)).trim(),
@@ -361,7 +353,7 @@ function setValues(v) {
   inputs.mode_key_pedal_enable.checked = !!(v.mode_key_pedal_enable ?? flags.key);
   inputs.mode_gear_enable.checked = !!(v.mode_gear_enable ?? DEFAULTS.mode_gear_enable);
 
-  ["steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey","open_settings_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode","gear_up_button","gear_down_button","gear_up_key","gear_down_key"].forEach((k) => {
+  ["steering_axis","toggle_hotkey","toggle_fullscreen_hotkey","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode","gear_up_button","gear_down_button","gear_up_key","gear_down_key"].forEach((k) => {
     if (inputs[k]) inputs[k].value = String(v[k] ?? DEFAULTS[k]);
   });
   applyGearModeVisibility();
@@ -375,7 +367,7 @@ function hasChanges() {
 }
 
 function getEffectiveHotkeyFields() {
-  const fields = ["toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey"];
+  const fields = ["toggle_hotkey", "toggle_fullscreen_hotkey"];
   if (inputs.gas_brake_mapping_mode.value === "keyboard") fields.push("gas_key", "brake_key");
   if (inputs.gear_mapping_mode.value === "keyboard") fields.push("gear_up_key", "gear_down_key");
   return fields;
@@ -567,7 +559,7 @@ function wireIconActions() {
     if (el) el.addEventListener("click", () => setField(key, String(DEFAULTS[key])));
   });
 
-  ["toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey","open_settings_hotkey","steering_axis","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode","gear_up_button","gear_down_button","gear_up_key","gear_down_key"].forEach((k) => {
+  ["toggle_hotkey","toggle_fullscreen_hotkey","steering_axis","gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button","gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode","gear_up_button","gear_down_button","gear_up_key","gear_down_key"].forEach((k) => {
     const r = document.getElementById(`reset-${k}`);
     if (r) r.addEventListener("click", () => setField(k, String(DEFAULTS[k])));
     const c = document.getElementById(`clear-${k}`);
@@ -584,7 +576,7 @@ bindHoverDetail(tabs.bind, "bind");
 [
   "mode_direction_enable","mode_linear_pedal_enable","mode_key_pedal_enable","mode_gear_enable","fullscreen_mode","window_scale","fullscreen_scale",
   "fullscreen_alpha","hud_fps","reference_range_x_ratio","reference_range_y_ratio","min_output_x","gear_pulse_ms",
-  "hide_cursor_on_enable","steering_axis","toggle_hotkey","switch_mode_hotkey","toggle_fullscreen_hotkey","open_settings_hotkey",
+  "hide_cursor_on_enable","steering_axis","toggle_hotkey","toggle_fullscreen_hotkey",
   "gas_mouse_button","brake_mouse_button","gear_up_mouse_button","gear_down_mouse_button","gas_output_button","brake_output_button",
   "gas_brake_mapping_mode","gas_key","brake_key","gear_mapping_mode","gear_up_button","gear_down_button","gear_up_key","gear_down_key"
 ].forEach((k) => bindHoverDetail(document.getElementById(`lbl-${k}`), k));
@@ -604,8 +596,8 @@ bindDragAdjust(inputs.min_output_x, "min_output_x", 0, 1, 0.01);
 bindDragAdjust(document.getElementById("lbl-gear_pulse_ms"), "gear_pulse_ms", 10, 300, 1);
 bindDragAdjust(inputs.gear_pulse_ms, "gear_pulse_ms", 10, 300, 1);
 
-[inputs.toggle_hotkey, inputs.switch_mode_hotkey, inputs.toggle_fullscreen_hotkey, inputs.open_settings_hotkey, inputs.gas_key, inputs.brake_key, inputs.gear_up_key, inputs.gear_down_key].forEach(bindHotkeyCapture);
-[inputs.toggle_hotkey, inputs.switch_mode_hotkey, inputs.toggle_fullscreen_hotkey, inputs.open_settings_hotkey, inputs.gas_key, inputs.brake_key, inputs.gear_up_key, inputs.gear_down_key].forEach((el) => {
+[inputs.toggle_hotkey, inputs.toggle_fullscreen_hotkey, inputs.gas_key, inputs.brake_key, inputs.gear_up_key, inputs.gear_down_key].forEach(bindHotkeyCapture);
+[inputs.toggle_hotkey, inputs.toggle_fullscreen_hotkey, inputs.gas_key, inputs.brake_key, inputs.gear_up_key, inputs.gear_down_key].forEach((el) => {
   if (!el) return;
   el.addEventListener("input", () => validateHotkeyConflicts(false));
   el.addEventListener("blur", () => validateHotkeyConflicts(false));

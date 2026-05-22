@@ -47,9 +47,7 @@ class AppConfig:
     hud_fps: int = 25
     gear_pulse_ms: int = 45
     toggle_hotkey: str = "shift+v"
-    switch_mode_hotkey: str = "alt+shift+v"
     toggle_fullscreen_hotkey: str = "alt+f"
-    open_settings_hotkey: str = "ctrl+shift+o"
     fullscreen_mode: bool = False
     gas_mouse_button: str = "right"
     brake_mouse_button: str = "left"
@@ -434,9 +432,7 @@ def load_config() -> AppConfig:
         cfg.hud_fps = parser.getint(section, "hud_fps", fallback=cfg.hud_fps)
         cfg.gear_pulse_ms = parser.getint(section, "gear_pulse_ms", fallback=cfg.gear_pulse_ms)
         cfg.toggle_hotkey = parser.get(section, "toggle_hotkey", fallback=cfg.toggle_hotkey)
-        cfg.switch_mode_hotkey = parser.get(section, "switch_mode_hotkey", fallback=cfg.switch_mode_hotkey)
         cfg.toggle_fullscreen_hotkey = parser.get(section, "toggle_fullscreen_hotkey", fallback=cfg.toggle_fullscreen_hotkey)
-        cfg.open_settings_hotkey = parser.get(section, "open_settings_hotkey", fallback=cfg.open_settings_hotkey)
         cfg.fullscreen_mode = parser.getboolean(section, "fullscreen_mode", fallback=cfg.fullscreen_mode)
         cfg.gas_mouse_button = parser.get(section, "gas_mouse_button", fallback=cfg.gas_mouse_button)
         cfg.brake_mouse_button = parser.get(section, "brake_mouse_button", fallback=cfg.brake_mouse_button)
@@ -538,9 +534,7 @@ def save_default_config(cfg: AppConfig) -> None:
         "hud_fps": str(cfg.hud_fps),
         "gear_pulse_ms": str(cfg.gear_pulse_ms),
         "toggle_hotkey": cfg.toggle_hotkey,
-        "switch_mode_hotkey": cfg.switch_mode_hotkey,
         "toggle_fullscreen_hotkey": cfg.toggle_fullscreen_hotkey,
-        "open_settings_hotkey": cfg.open_settings_hotkey,
         "fullscreen_mode": str(cfg.fullscreen_mode).lower(),
         "gas_mouse_button": cfg.gas_mouse_button,
         "brake_mouse_button": cfg.brake_mouse_button,
@@ -625,9 +619,7 @@ def load_settings_defaults() -> dict:
         "mode_gear_enable": True,
         "steering_axis": "left_x",
         "toggle_hotkey": "shift+v",
-        "switch_mode_hotkey": "alt+shift+v",
         "toggle_fullscreen_hotkey": "alt+f",
-        "open_settings_hotkey": "ctrl+shift+o",
         "gas_mouse_button": "right",
         "brake_mouse_button": "left",
         "gear_up_mouse_button": "wheel_up",
@@ -653,7 +645,7 @@ def load_settings_defaults() -> dict:
             parser.read(SETTINGS_DEFAULTS_PATH, encoding="utf-8-sig")
             sec = "defaults"
             if parser.has_section(sec):
-                for k in ("language", "toggle_hotkey", "switch_mode_hotkey", "toggle_fullscreen_hotkey", "open_settings_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"):
+                for k in ("language", "toggle_hotkey", "toggle_fullscreen_hotkey", "steering_axis", "gas_mouse_button", "brake_mouse_button", "gear_up_mouse_button", "gear_down_mouse_button", "gas_output_button", "brake_output_button", "gas_brake_mapping_mode", "gas_key", "brake_key", "gear_mapping_mode", "gear_up_button", "gear_down_button", "gear_up_key", "gear_down_key"):
                     result[k] = parser.get(sec, k, fallback=str(result[k]))
                 for k in ("hud_fps", "gear_pulse_ms", "control_mode"):
                     result[k] = parser.getint(sec, k, fallback=int(result[k]))
@@ -686,9 +678,7 @@ def apply_defaults_to_config(cfg: AppConfig, defaults: dict) -> None:
     cfg.mode_gear_enable = bool(defaults.get("mode_gear_enable", cfg.mode_gear_enable))
     cfg.steering_axis = str(defaults.get("steering_axis", cfg.steering_axis))
     cfg.toggle_hotkey = str(defaults.get("toggle_hotkey", cfg.toggle_hotkey))
-    cfg.switch_mode_hotkey = str(defaults.get("switch_mode_hotkey", cfg.switch_mode_hotkey))
     cfg.toggle_fullscreen_hotkey = str(defaults.get("toggle_fullscreen_hotkey", cfg.toggle_fullscreen_hotkey))
-    cfg.open_settings_hotkey = str(defaults.get("open_settings_hotkey", cfg.open_settings_hotkey))
     cfg.gas_mouse_button = str(defaults.get("gas_mouse_button", cfg.gas_mouse_button))
     cfg.brake_mouse_button = str(defaults.get("brake_mouse_button", cfg.brake_mouse_button))
     cfg.gear_up_mouse_button = str(defaults.get("gear_up_mouse_button", cfg.gear_up_mouse_button))
@@ -1485,7 +1475,6 @@ class MouseToVirtualGamepad:
 
         self.mouse_controller = mouse.Controller()
         self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
-        self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
         self.toggle_fullscreen_combo = parse_hotkey_combo(self.config.toggle_fullscreen_hotkey)
         self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
@@ -1515,7 +1504,6 @@ class MouseToVirtualGamepad:
         self.hud_fullscreen_rect: tuple[int, int, int, int] | None = None
         self.hud_fullscreen_supported = True
         self.settings_panel_open = False
-        self.open_settings_requested = False
         self.hud_fullscreen_enabled = bool(self.config.fullscreen_mode)
         self._last_scroll_reason_log_ts = 0.0
 
@@ -1557,9 +1545,7 @@ class MouseToVirtualGamepad:
             "mode_gear_enable": self.config.mode_gear_enable,
             "steering_axis": self.config.steering_axis,
             "toggle_hotkey": self.config.toggle_hotkey,
-            "switch_mode_hotkey": self.config.switch_mode_hotkey,
             "toggle_fullscreen_hotkey": self.config.toggle_fullscreen_hotkey,
-            "open_settings_hotkey": self.config.open_settings_hotkey,
             "fullscreen_mode": self.hud_fullscreen_enabled,
             "gas_mouse_button": self.config.gas_mouse_button,
             "brake_mouse_button": self.config.brake_mouse_button,
@@ -1633,9 +1619,7 @@ class MouseToVirtualGamepad:
         if steering_axis in {"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger", "none"}:
             self.config.steering_axis = steering_axis
         self.config.toggle_hotkey = str(values.get("toggle_hotkey", self.config.toggle_hotkey)).strip() or "shift+v"
-        self.config.switch_mode_hotkey = str(values.get("switch_mode_hotkey", self.config.switch_mode_hotkey)).strip() or "alt+shift+v"
         self.config.toggle_fullscreen_hotkey = str(values.get("toggle_fullscreen_hotkey", self.config.toggle_fullscreen_hotkey)).strip() or "alt+f"
-        self.config.open_settings_hotkey = str(values.get("open_settings_hotkey", self.config.open_settings_hotkey)).strip() or "ctrl+shift+o"
         self.config.fullscreen_mode = bool(values.get("fullscreen_mode", self.config.fullscreen_mode))
         self.config.gas_mouse_button = str(values.get("gas_mouse_button", self.config.gas_mouse_button)).strip().lower() or "right"
         self.config.brake_mouse_button = str(values.get("brake_mouse_button", self.config.brake_mouse_button)).strip().lower() or "left"
@@ -1670,9 +1654,7 @@ class MouseToVirtualGamepad:
         self.config.reference_range_y_px = max(1.0, (1.0 - self.config.reference_range_y_ratio) * 540.0)
         self.config.min_output_x = clamp(float(values["min_output_x"]), 0.0, 1.0)
         self.toggle_combo = parse_hotkey_combo(self.config.toggle_hotkey)
-        self.switch_mode_combo = parse_hotkey_combo(self.config.switch_mode_hotkey)
         self.toggle_fullscreen_combo = parse_hotkey_combo(self.config.toggle_fullscreen_hotkey)
-        self.open_settings_combo = parse_hotkey_combo(self.config.open_settings_hotkey)
         self.gas_mouse_btn = resolve_mouse_button(self.config.gas_mouse_button)
         self.brake_mouse_btn = resolve_mouse_button(self.config.brake_mouse_button)
         self.gear_up_mouse_btn = resolve_mouse_button(self.config.gear_up_mouse_button)
@@ -1793,21 +1775,6 @@ class MouseToVirtualGamepad:
         if self.settings_panel_open:
             return
         self.pressed_keys.add(token)
-
-        if self._combo_just_pressed("open_settings", self.open_settings_combo):
-            self.open_settings_requested = True
-            return
-
-        if self._combo_just_pressed("switch_mode", self.switch_mode_combo):
-            self.config.control_mode += 1
-            if self.config.control_mode > 4:
-                self.config.control_mode = 1
-            d, l, k = control_mode_to_flags(self.config.control_mode)
-            self.config.mode_direction_enable = d
-            self.config.mode_linear_pedal_enable = l
-            self.config.mode_key_pedal_enable = k
-            self.state.last_error = self._t("app.error.mode_switched", "Control mode template switched")
-            return
 
         if self._combo_just_pressed("toggle_mapper", self.toggle_combo):
             self._set_mapper_enabled(not self.state.enabled)
@@ -2221,7 +2188,7 @@ class MouseToVirtualGamepad:
                 lambda: self.hud_fullscreen_enabled,
                 lambda: self.hud_fullscreen_rect,
                 self._on_hud_fullscreen_state,
-                self._consume_open_settings_request,
+                lambda: False,
                 self.stop_event,
             )
         finally:
@@ -2242,18 +2209,10 @@ class MouseToVirtualGamepad:
             self.pressed_keys.clear()
             self.handled_combos.clear()
 
-    def _consume_open_settings_request(self) -> bool:
-        if self.open_settings_requested:
-            self.open_settings_requested = False
-            if self.state.enabled:
-                self._set_mapper_enabled(False)
-            return True
-        return False
-
-
 if __name__ == "__main__":
     app = MouseToVirtualGamepad()
     app.run()
+
 
 
 
