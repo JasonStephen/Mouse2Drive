@@ -121,6 +121,30 @@ let hotkeyLastCombo = "";
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+function escapeHtml(text) {
+  return String(text ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderDetailText(rawText) {
+  let html = escapeHtml(rawText);
+  html = html.replace(/\[b\]([\s\S]*?)\[\/b\]/gi, "<strong>$1</strong>");
+  html = html.replace(/\[swarn\]([\s\S]*?)\[\/swarn\]/gi, '<span class="detail-red">$1</span>');
+  html = html.replace(/\[warn\]([\s\S]*?)\[\/warn\]/gi, '<span class="detail-yellow">$1</span>');
+  html = html.replace(/\[success\]([\s\S]*?)\[\/success\]/gi, '<span class="detail-green">$1</span>');
+  html = html.replace(/\[info\]([\s\S]*?)\[\/info\]/gi, '<span class="detail-blue">$1</span>');
+  html = html.replace(/\/n/g, "<br>");
+  return html;
+}
+
+function setDetailContent(text) {
+  detailEl.innerHTML = renderDetailText(text || "");
+}
+
 function applyTextI18n() {
   const textMap = {
     "txt-settings-type-title": t("settings.title.type", "Settings Type"),
@@ -237,7 +261,7 @@ function applyOptionsFromConfig() {
 function showPage(kind) {
   Object.keys(tabs).forEach((k) => tabs[k].classList.toggle("active", k === kind));
   Object.keys(pages).forEach((k) => pages[k].classList.toggle("hidden", k !== kind));
-  detailEl.textContent = detailMap[kind] || "";
+  setDetailContent(detailMap[kind] || "");
 }
 
 function getCurrentPageKind() {
@@ -434,13 +458,13 @@ async function closePanel() {
 
 function bindHoverDetail(el, key) {
   if (!el) return;
-  el.addEventListener("mouseenter", () => { detailEl.textContent = detailMap[key] || ""; });
+  el.addEventListener("mouseenter", () => { setDetailContent(detailMap[key] || ""); });
   el.addEventListener("mouseleave", () => {
-    if (tabs.language.classList.contains("active")) detailEl.textContent = detailMap.language;
-    else if (tabs.mode.classList.contains("active")) detailEl.textContent = detailMap.mode;
-    else if (tabs.display.classList.contains("active")) detailEl.textContent = detailMap.display;
-    else if (tabs.sense.classList.contains("active")) detailEl.textContent = detailMap.sense;
-    else detailEl.textContent = detailMap.bind;
+    if (tabs.language.classList.contains("active")) setDetailContent(detailMap.language);
+    else if (tabs.mode.classList.contains("active")) setDetailContent(detailMap.mode);
+    else if (tabs.display.classList.contains("active")) setDetailContent(detailMap.display);
+    else if (tabs.sense.classList.contains("active")) setDetailContent(detailMap.sense);
+    else setDetailContent(detailMap.bind);
   });
 }
 
