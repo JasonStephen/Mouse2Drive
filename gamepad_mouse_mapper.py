@@ -2245,6 +2245,8 @@ class MouseToVirtualGamepad:
     def _consume_open_settings_request(self) -> bool:
         if self.open_settings_requested:
             self.open_settings_requested = False
+            if self.state.enabled:
+                self._set_mapper_enabled(False)
             return True
         return False
 
