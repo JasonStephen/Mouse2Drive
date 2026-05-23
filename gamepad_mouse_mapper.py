@@ -16,11 +16,12 @@ import vgamepad as vg
 from pynput import keyboard, mouse
 
 
-CONFIG_PATH = Path(__file__).with_name("config.cfg")
-SETTINGS_DEFAULTS_PATH = Path(__file__).with_name("settings_defaults.cfg")
-SETTINGS_OPTIONS_PATH = Path(__file__).with_name("settings_options.cfg")
-I18N_ZH_PATH = Path(__file__).with_name("i18n_zh-CN.cfg")
-I18N_EN_PATH = Path(__file__).with_name("i18n_en-US.cfg")
+APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+CONFIG_PATH = APP_BASE_DIR / "config.cfg"
+SETTINGS_DEFAULTS_PATH = APP_BASE_DIR / "settings_defaults.cfg"
+SETTINGS_OPTIONS_PATH = APP_BASE_DIR / "settings_options.cfg"
+I18N_ZH_PATH = APP_BASE_DIR / "i18n_zh-CN.cfg"
+I18N_EN_PATH = APP_BASE_DIR / "i18n_en-US.cfg"
 POLL_INTERVAL = 0.01
 HUD_FPS_OPTIONS = (15, 30, 60, 90, 120)
 ICON_FONT_FAMILY = "Segoe MDL2 Assets"
@@ -1187,10 +1188,20 @@ class Indicator:
             return
         baseline = self._get_live_settings()
         self._settings_debug_log(f"baseline={baseline}")
-        script_path = Path(__file__).with_name("settings_webview.py")
-        if not script_path.exists():
-            self.local_error_text = self._t("app.error.settings_script_missing", "未找到 settings_webview.py")
-            self._settings_debug_log("settings_webview.py missing")
+        if getattr(sys, "frozen", False):
+            settings_entry = Path(sys.executable).resolve().with_name("settings_webview.exe")
+            launch_cmd = [str(settings_entry)]
+            missing_text = "未找到 settings_webview.exe"
+            missing_log = "settings_webview.exe missing"
+        else:
+            settings_entry = Path(__file__).resolve().with_name("settings_webview.py")
+            launch_cmd = [sys.executable, str(settings_entry)]
+            missing_text = "未找到 settings_webview.py"
+            missing_log = "settings_webview.py missing"
+
+        if not settings_entry.exists():
+            self.local_error_text = self._t("app.error.settings_script_missing", missing_text)
+            self._settings_debug_log(missing_log)
             return
         try:
             with open(self.settings_state_path, "w", encoding="utf-8") as f:
@@ -1203,8 +1214,8 @@ class Indicator:
                 self.settings_webview_log_handle = None
             self._settings_debug_log("starting settings_webview subprocess")
             self.settings_webview_proc = subprocess.Popen(
-                [sys.executable, str(script_path), "--ipc", self.settings_ipc_path, "--state-file", self.settings_state_path],
-                cwd=str(Path(__file__).parent),
+                launch_cmd + ["--ipc", self.settings_ipc_path, "--state-file", self.settings_state_path],
+                cwd=str(APP_BASE_DIR),
             )
             self.local_error_text = f"{self._t('app.error.settings_window_starting', '设置窗口启动中')} pid={self.settings_webview_proc.pid}"
             if callable(self.settings_open_callback):
