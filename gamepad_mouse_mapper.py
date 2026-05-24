@@ -24,11 +24,11 @@ except Exception:
 
 
 APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-CONFIG_PATH = APP_BASE_DIR / "config.cfg"
-SETTINGS_DEFAULTS_PATH = APP_BASE_DIR / "settings_defaults.cfg"
-SETTINGS_OPTIONS_PATH = APP_BASE_DIR / "settings_options.cfg"
-I18N_ZH_PATH = APP_BASE_DIR / "i18n_zh-CN.cfg"
-I18N_EN_PATH = APP_BASE_DIR / "i18n_en-US.cfg"
+CONFIG_PATH = APP_BASE_DIR / "config" / "config.cfg"
+SETTINGS_DEFAULTS_PATH = APP_BASE_DIR / "config" / "settings_defaults.cfg"
+SETTINGS_OPTIONS_PATH = APP_BASE_DIR / "config" / "settings_options.cfg"
+I18N_ZH_PATH = APP_BASE_DIR / "locale" / "i18n_zh-CN.cfg"
+I18N_EN_PATH = APP_BASE_DIR / "locale" / "i18n_en-US.cfg"
 POLL_INTERVAL = 0.01
 HUD_FPS_OPTIONS = (15, 30, 60, 90, 120)
 ICON_FONT_FAMILY = "Segoe MDL2 Assets"

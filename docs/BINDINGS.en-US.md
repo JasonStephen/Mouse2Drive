@@ -1,6 +1,6 @@
-# Mouse2Pad Bindings and Config Reference
+﻿# Mouse2Pad Bindings and Config Reference
 
-This document is aligned with the current implementation (`gamepad_mouse_mapper.py` + `settings_defaults.cfg`).
+This document is aligned with the current implementation (`gamepad_mouse_mapper.py` + `config/settings_defaults.cfg`).
 
 ## Mode Mapping (`control_mode`)
 
@@ -11,7 +11,7 @@ This document is aligned with the current implementation (`gamepad_mouse_mapper.
 | 3 | Linear RT/LT Only | No steering; Mouse Y up/down -> linear RT/LT |
 | 4 | Key RT/LT Only | No steering; throttle/brake keys -> RT/LT=1.00 |
 
-## Function Hotkeys (`config.cfg`)
+## Function Hotkeys (`config/config.cfg`)
 
 | Key | Default | Description |
 |---|---|---|
@@ -20,16 +20,16 @@ This document is aligned with the current implementation (`gamepad_mouse_mapper.
 
 Hotkey format examples: `shift+v`, `alt+f`, `f10`, `ctrl+alt+r`
 
-## Mouse Bindings (`config.cfg`)
+## Mouse Bindings (`config/config.cfg`)
 
-| Key | Default | Options (from `settings_options.cfg`) |
+| Key | Default | Options (from `config/settings_options.cfg`) |
 |---|---|---|
 | `gas_mouse_button` | `right` | `left` / `right` / `middle` / `x1` / `x2` / `wheel_up` / `wheel_down` / `none` |
 | `brake_mouse_button` | `left` | same as above |
 | `gear_up_mouse_button` | `wheel_up` | same as above |
 | `gear_down_mouse_button` | `wheel_down` | same as above |
 
-## Pedal/Gear Mapping (`config.cfg`)
+## Pedal/Gear Mapping (`config/config.cfg`)
 
 | Key | Default | Description |
 |---|---|---|
@@ -49,7 +49,7 @@ Hotkey format examples: `shift+v`, `alt+f`, `f10`, `ctrl+alt+r`
 
 | Key | Default | Description |
 |---|---|---|
-| `hud_fps` | `60` | HUD refresh FPS; options come from `settings_options.cfg` (default `15/30/60/90/120`) |
+| `hud_fps` | `60` | HUD refresh FPS; options come from `config/settings_options.cfg` (default `15/30/60/90/120`) |
 | `debug_mode` | `false` | Debug text switch |
 | `fullscreen_mode` | `false` | HUD fullscreen mode |
 | `windows_scale` | `1.00` | Window scale, clamped to `0.8~1.5` |
@@ -67,3 +67,4 @@ Hotkey format examples: `shift+v`, `alt+f`, `f10`, `ctrl+alt+r`
 | `steering_axis` | `left_x` | Steering target axis (`left_x`/`left_y`/`right_x`/`right_y`/`left_trigger`/`right_trigger`/`none`) |
 
 Note: the code still keeps `reference_range_x_px` / `reference_range_y_px` for backward compatibility, but ratio fields are the preferred semantics.
+

@@ -1,6 +1,6 @@
-# Mouse2Pad 绑定与配置说明
+﻿# Mouse2Pad 绑定与配置说明
 
-本文档与当前代码实现保持一致（`gamepad_mouse_mapper.py` + `settings_defaults.cfg`）。
+本文档与当前代码实现保持一致（`gamepad_mouse_mapper.py` + `config/settings_defaults.cfg`）。
 
 ## 模式对照（`control_mode`）
 
@@ -11,7 +11,7 @@
 | 3 | 仅线性 RT/LT | 不控制方向；鼠标 Y 上/下 -> RT/LT 线性 |
 | 4 | 仅按键 RT/LT | 不控制方向；油门键/刹车键 -> RT/LT=1.00 |
 
-## 功能热键（`config.cfg`）
+## 功能热键（`config/config.cfg`）
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
@@ -20,16 +20,16 @@
 
 热键格式示例：`shift+v`、`alt+f`、`f10`、`ctrl+alt+r`
 
-## 鼠标绑定（`config.cfg`）
+## 鼠标绑定（`config/config.cfg`）
 
-| 配置项 | 默认值 | 可选值（由 `settings_options.cfg` 提供） |
+| 配置项 | 默认值 | 可选值（由 `config/settings_options.cfg` 提供） |
 |---|---|---|
 | `gas_mouse_button` | `right` | `left` / `right` / `middle` / `x1` / `x2` / `wheel_up` / `wheel_down` / `none` |
 | `brake_mouse_button` | `left` | 同上 |
 | `gear_up_mouse_button` | `wheel_up` | 同上 |
 | `gear_down_mouse_button` | `wheel_down` | 同上 |
 
-## 踏板/换挡映射（`config.cfg`）
+## 踏板/换挡映射（`config/config.cfg`）
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
@@ -49,7 +49,7 @@
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `hud_fps` | `60` | HUD 刷新帧率；可选值来自 `settings_options.cfg`（默认 `15/30/60/90/120`） |
+| `hud_fps` | `60` | HUD 刷新帧率；可选值来自 `config/settings_options.cfg`（默认 `15/30/60/90/120`） |
 | `debug_mode` | `false` | 调试文本开关 |
 | `fullscreen_mode` | `false` | HUD 是否全屏显示 |
 | `windows_scale` | `1.00` | 窗口缩放，限制 `0.8~1.5` |
@@ -67,3 +67,4 @@
 | `steering_axis` | `left_x` | 转向映射轴（`left_x`/`left_y`/`right_x`/`right_y`/`left_trigger`/`right_trigger`/`none`） |
 
 说明：代码内部仍保留 `reference_range_x_px` / `reference_range_y_px` 以兼容旧配置，但新语义优先使用 ratio 字段。
+
