@@ -24,15 +24,15 @@ def _resolve_existing_path(candidates: list[Path]) -> Path:
 
 def _parse_i18n_file(path: Path) -> dict[str, str]:
     result: dict[str, str] = {}
-    if not path.exists():
-        return result
-    parser = configparser.ConfigParser()
-    parser.optionxform = str
     try:
-        parser.read(path, encoding="utf-8-sig")
-        for sec in parser.sections():
-            for key, val in parser.items(sec):
-                result[f"{sec}.{key}"] = str(val)
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            key = k.strip()
+            if key:
+                result[key] = v.strip()
     except Exception:
         pass
     return result

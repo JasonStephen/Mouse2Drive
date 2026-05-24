@@ -2,3 +2,4 @@ pynput
 vgamepad
 pystray
 pillow
+pywebview
