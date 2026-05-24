@@ -14,6 +14,13 @@ from pathlib import Path
 
 import vgamepad as vg
 from pynput import keyboard, mouse
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+except Exception:
+    pystray = None
+    Image = None
+    ImageDraw = None
 
 
 APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -728,6 +735,7 @@ class Indicator:
         settings_getter=None,
         settings_apply_callback=None,
         settings_open_callback=None,
+        exit_callback=None,
     ) -> None:
         self.debug_mode = debug_mode
         self.hud_fps = int(clamp(hud_fps, 5, 240))
@@ -742,6 +750,7 @@ class Indicator:
         self.settings_getter = settings_getter
         self.settings_apply_callback = settings_apply_callback
         self.settings_open_callback = settings_open_callback
+        self.exit_callback = exit_callback
         self.settings_window: tk.Toplevel | None = None
         self.settings_window_scale_var: tk.StringVar | None = None
         self.settings_fullscreen_scale_var: tk.StringVar | None = None
@@ -811,6 +820,55 @@ class Indicator:
         self.apply_view_mode(False)
         self._init_scene()
         self.root.after(250, self._poll_settings_ipc)
+        self.tray_icon = None
+        self.tray_enabled = False
+        self._start_tray_icon()
+
+    def _build_tray_image(self):
+        if Image is None or ImageDraw is None:
+            return None
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle((4, 4, 60, 60), radius=12, fill=(25, 25, 25, 255))
+        draw.rectangle((18, 18, 46, 46), outline=(120, 255, 155, 255), width=4)
+        draw.rectangle((30, 10, 34, 18), fill=(255, 107, 107, 255))
+        return img
+
+    def _request_exit(self) -> None:
+        try:
+            if callable(self.exit_callback):
+                self.exit_callback()
+        except Exception:
+            pass
+
+    def _start_tray_icon(self) -> None:
+        if pystray is None:
+            return
+        try:
+            icon_image = self._build_tray_image()
+            if icon_image is None:
+                return
+            title = self._t("app.window.title", "Mouse_Controller")
+            menu = pystray.Menu(
+                pystray.MenuItem(self._t("app.tray.exit", "退出"), lambda _icon, _item: self._request_exit())
+            )
+            self.tray_icon = pystray.Icon("mouse_controller_tray", icon_image, title, menu)
+            self.tray_icon.run_detached()
+            self.tray_enabled = True
+        except Exception:
+            self.tray_icon = None
+            self.tray_enabled = False
+
+    def _stop_tray_icon(self) -> None:
+        if not self.tray_enabled or self.tray_icon is None:
+            return
+        try:
+            self.tray_icon.stop()
+        except Exception:
+            pass
+        finally:
+            self.tray_icon = None
+            self.tray_enabled = False
 
     def _t(self, key: str, fallback: str) -> str:
         val = self.i18n.get(key)
@@ -1189,8 +1247,18 @@ class Indicator:
         baseline = self._get_live_settings()
         self._settings_debug_log(f"baseline={baseline}")
         if getattr(sys, "frozen", False):
-            settings_entry = Path(sys.executable).resolve().with_name("settings_webview.exe")
-            launch_cmd = [str(settings_entry)]
+            exe_dir = Path(sys.executable).resolve().parent
+            candidates = [
+                exe_dir / "settings_webview.exe",
+                exe_dir / "settings_webview" / "settings_webview.exe",
+                exe_dir.parent / "settings_webview" / "settings_webview.exe",
+            ]
+            settings_entry = None
+            for p in candidates:
+                if p.exists():
+                    settings_entry = p
+                    break
+            launch_cmd = [str(settings_entry)] if settings_entry is not None else []
             missing_text = "未找到 settings_webview.exe"
             missing_log = "settings_webview.exe missing"
         else:
@@ -1199,7 +1267,7 @@ class Indicator:
             missing_text = "未找到 settings_webview.py"
             missing_log = "settings_webview.py missing"
 
-        if not settings_entry.exists():
+        if settings_entry is None or not settings_entry.exists():
             self.local_error_text = self._t("app.error.settings_script_missing", missing_text)
             self._settings_debug_log(missing_log)
             return
@@ -1442,6 +1510,7 @@ class Indicator:
     ) -> None:
         def tick() -> None:
             if stop_event.is_set():
+                self._stop_tray_icon()
                 self.root.destroy()
                 return
             if callable(open_settings_request_getter):
@@ -1460,7 +1529,10 @@ class Indicator:
             self.root.after(self.hud_interval_ms, tick)
 
         tick()
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self._stop_tray_icon()
 
 
 class MouseToVirtualGamepad:
@@ -2186,6 +2258,7 @@ class MouseToVirtualGamepad:
             settings_getter=self.get_runtime_settings,
             settings_apply_callback=self.apply_runtime_settings,
             settings_open_callback=self.set_settings_panel_open,
+            exit_callback=self.stop_event.set,
         )
         indicator.root.protocol("WM_DELETE_WINDOW", self.stop_event.set)
 

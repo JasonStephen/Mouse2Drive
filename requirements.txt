@@ -1,2 +1,4 @@
-﻿pynput
+pynput
 vgamepad
+pystray
+pillow
