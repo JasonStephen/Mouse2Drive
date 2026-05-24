@@ -1,6 +1,6 @@
-﻿# FH Liner Controller 首次操作指引（中文）
+﻿# Mouse2Drive 首次操作指引（中文）
 
-FH Liner Controller本身是我为了游玩地平线6逛风景时，能有一个像使用方向盘开车一样的体验而设计的该工具。因为补齐了功能，也希望能分享给您。
+Mouse2Drive本身是我为了游玩地平线6逛风景时，能有一个像使用方向盘开车一样的体验而设计的该工具。因为补齐了功能，也希望能分享给您。
 
 但实际上该工具理论可以使用在非常多的游戏中，但仅在极限竞速地平线6中测试过。
 
@@ -85,9 +85,9 @@ FH Liner Controller本身是我为了游玩地平线6逛风景时，能有一个
 
 ---
 
-# FH Liner Controller First-Time Guide (English)
+# Mouse2Drive First-Time Guide (English)
 
-FH Liner Controller itself is a tool I designed so that when playing Forza Horizon 6 and cruising for scenery, I could have an experience similar to driving with a steering wheel. Since the features are now more complete, I also hope to share it with you.
+Mouse2Drive itself is a tool I designed so that when playing Forza Horizon 6 and cruising for scenery, I could have an experience similar to driving with a steering wheel. Since the features are now more complete, I also hope to share it with you.
 
 In theory, this tool can be used in many games, but in practice it has only been tested in Forza Horizon 6.
 
